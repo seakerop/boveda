@@ -98,17 +98,20 @@ export function buildDailySeries(data) {
   const txsAll = [...data.transactions].sort(byDate);
   if (!txsAll.length) return [];
   const end = todayStr();
+  // Precios y FX como arrays ordenados con puntero: el "último valor conocido"
+  // se arrastra consumiendo también las fechas ANTERIORES al inicio de la serie
+  // (si compras hoy y el FX del BCE llega hasta ayer, vale el de ayer).
   const perAsset = data.assets.map((a) => {
     const cur = assetCurrency(data, a);
     return {
       a,
       txs: txsAll.filter((t) => t.assetId === a.id),
-      priceMap: new Map(data.priceCache?.[a.id]?.daily || []),
-      fxMap: cur === 'EUR' ? null : new Map(data.fxCache?.[cur]?.daily || []),
+      prices: data.priceCache?.[a.id]?.daily || [],
+      fx: cur === 'EUR' ? null : data.fxCache?.[cur]?.daily || [],
       vals: data.valuations.filter((v) => v.assetId === a.id).sort(byDate),
     };
   });
-  const state = perAsset.map((x) => ({ i: 0, qty: 0, cost: 0, lastPrice: null, lastFx: x.fxMap ? null : 1 }));
+  const state = perAsset.map((x) => ({ i: 0, pi: 0, fi: 0, qty: 0, cost: 0, lastPrice: null, lastFx: x.fx ? null : 1 }));
   // Deudas: cuadro precomputado por préstamo; antes del alta se asume el
   // capital del alta (la deuda existía, solo que sin registrar).
   const loanCtx = { euribor: euriborMap(data.euriborCache) };
@@ -136,8 +139,16 @@ export function buildDailySeries(data) {
         }
         s.i++;
       }
-      if (x.priceMap.has(date)) s.lastPrice = x.priceMap.get(date);
-      if (x.fxMap && x.fxMap.has(date)) s.lastFx = x.fxMap.get(date);
+      while (s.pi < x.prices.length && x.prices[s.pi][0] <= date) {
+        s.lastPrice = x.prices[s.pi][1];
+        s.pi++;
+      }
+      if (x.fx) {
+        while (s.fi < x.fx.length && x.fx[s.fi][0] <= date) {
+          s.lastFx = x.fx[s.fi][1];
+          s.fi++;
+        }
+      }
       let v = 0;
       if (s.qty > 0) {
         if (x.a.type === 'realestate') v = manualValue(x.vals, date, s.cost);
