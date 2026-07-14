@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { assetDailyEurPairs, txMarkers, weeklyFromPairs, SEGMENTS } from '../lib/portfolio.js';
-import { loanState } from '../lib/loan.js';
+import { euriborMap, loanState } from '../lib/loan.js';
 import { fmtEur, fmtPct, fmtPrice, fmtQty, money } from '../lib/format.js';
 import { todayStr } from '../lib/prices.js';
 import CandleChart, { RangePicker, rangeCutoff } from './CandleChart.jsx';
@@ -151,7 +151,8 @@ export default function AssetDetail({ assetId, onBack }) {
   const linkedDebt = useMemo(() => {
     const linked = (data?.debts || []).filter((dd) => dd.linkedAssetId === assetId);
     if (!linked.length) return null;
-    return linked.reduce((s, dd) => s + loanState(dd, data.debtEvents).balance, 0);
+    const ctx = { euribor: euriborMap(data.euriborCache) };
+    return linked.reduce((s, dd) => s + loanState(dd, data.debtEvents, null, ctx).balance, 0);
   }, [data, assetId]);
 
   if (!asset) return null;

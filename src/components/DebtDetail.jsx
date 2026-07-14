@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
-import { loanState, simulateExtra, todayStr } from '../lib/loan.js';
+import { euriborMap, loanState, simulateExtra, todayStr } from '../lib/loan.js';
 import { fmtEur, fmtPct, money } from '../lib/format.js';
 
 const fmtMonths = (m) => {
@@ -91,26 +91,27 @@ export default function DebtDetail({ debtId, onBack }) {
   const [modal, setModal] = useState(false);
 
   const debt = data.debts.find((d) => d.id === debtId);
+  const ctx = useMemo(() => ({ euribor: euriborMap(data.euriborCache) }), [data]);
   const events = useMemo(
     () => (data.debtEvents || []).filter((e) => e.debtId === debtId).sort((a, b) => (a.date < b.date ? 1 : -1)),
     [data, debtId]
   );
-  const st = useMemo(() => (debt ? loanState(debt, data.debtEvents) : null), [data, debt]);
+  const st = useMemo(() => (debt ? loanState(debt, data.debtEvents, null, ctx) : null), [data, debt, ctx]);
 
   // Ahorro real acumulado: cuadro actual vs cuadro sin amortizaciones.
   const realSavings = useMemo(() => {
     if (!debt || !events.length) return null;
-    const sin = loanState(debt, []);
+    const sin = loanState(debt, [], null, ctx);
     return {
       interest: sin.totalInterest - st.totalInterest,
       months: sin.rows.filter((r) => r.kind === 'cuota').length - st.rows.filter((r) => r.kind === 'cuota').length,
     };
-  }, [debt, events, st]);
+  }, [debt, events, st, ctx]);
 
   const nAmount = parseFloat(amount);
   const sim = useMemo(
-    () => (debt && nAmount > 0 ? simulateExtra(debt, data.debtEvents, { amount: nAmount, recurring }) : null),
-    [debt, data, nAmount, recurring]
+    () => (debt && nAmount > 0 ? simulateExtra(debt, data.debtEvents, { amount: nAmount, recurring }, ctx) : null),
+    [debt, data, nAmount, recurring, ctx]
   );
   const bestKey = sim ? (sim.plazo.interestSaved >= sim.cuota.interestSaved ? 'plazo' : 'cuota') : null;
 
@@ -143,7 +144,10 @@ export default function DebtDetail({ debtId, onBack }) {
             <span className="dot" style={{ background: '#e66767' }} /> {debt.name}
           </div>
           <div className="detail-sub">
-            TIN {debt.rate.tin}% fijo · cuota el día {debt.paymentDay}
+            {debt.rate.type === 'variable'
+              ? `Euríbor 12M + ${debt.rate.spread}% · revisión cada ${debt.rate.reviewMonths} meses · tipo actual ${st.currentTin.toFixed(2)}%`
+              : `TIN ${debt.rate.tin}% fijo`}
+            {' · '}cuota el día {debt.paymentDay}
             {linked ? ` · ligado a ${linked.name}` : ''}
           </div>
         </div>
@@ -174,6 +178,20 @@ export default function DebtDetail({ debtId, onBack }) {
         <div className="chart-note">
           {Math.round(st.progress * 100)}% amortizado desde el alta · próxima cuota el {st.nextPaymentDate}
         </div>
+        {debt.rate.type === 'variable' && st.nextReview && (
+          <div className="op-total" style={{ marginTop: 12 }}>
+            Próxima revisión el <strong>{st.nextReview.date}</strong>: con el euríbor de hoy el tipo pasaría
+            al <strong>{st.nextReview.tin.toFixed(2)}%</strong> y la cuota a{' '}
+            <strong>{money(st.nextReview.payment, privacy)}/mes</strong>
+            {st.currentPayment != null && privacy === 'normal' && (
+              <span className={st.nextReview.payment > st.currentPayment ? 'down' : 'up'}>
+                {' '}({st.nextReview.payment > st.currentPayment ? '+' : ''}
+                {fmtEur(st.nextReview.payment - st.currentPayment)})
+              </span>
+            )}
+            .
+          </div>
+        )}
       </section>
 
       <section className="card sim-section">
@@ -252,6 +270,15 @@ export default function DebtDetail({ debtId, onBack }) {
                       <td>★</td>
                       <td>{r.date}</td>
                       <td colSpan={3}>Amortización anticipada de {privacy === 'normal' ? fmtEur(r.extra) : '•••'}</td>
+                      <td>{privacy === 'normal' ? fmtEur(r.balance) : '•••'}</td>
+                    </tr>
+                  ) : r.kind === 'review' ? (
+                    <tr key={i} className="schedule-review">
+                      <td>↻</td>
+                      <td>{r.date}</td>
+                      <td colSpan={3}>
+                        Revisión: tipo {r.tin.toFixed(2)}% → cuota {privacy === 'normal' ? `${fmtEur(r.payment)}/mes` : '•••'}
+                      </td>
                       <td>{privacy === 'normal' ? fmtEur(r.balance) : '•••'}</td>
                     </tr>
                   ) : (

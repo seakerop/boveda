@@ -34,13 +34,37 @@ function monthsToRepay(balance, tin, payment) {
   return Math.ceil(-Math.log(x) / Math.log(1 + i));
 }
 
+// Mapa 'YYYY-MM' → euríbor (%) desde la caché de la bóveda.
+export const euriborMap = (cache) =>
+  cache?.monthly?.length ? new Map(cache.monthly) : null;
+
+// Euríbor aplicable a una revisión: el del mes ANTERIOR a la fecha de revisión
+// (lo habitual en hipotecas españolas); si aún no está publicado, el último
+// disponible — que para revisiones futuras equivale a asumir el euríbor plano.
+function euriborAt(euribor, dateStr) {
+  if (!euribor) return null;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  const key = d.toISOString().slice(0, 7);
+  let best = null;
+  for (const [m, v] of euribor) {
+    if (m <= key && (!best || m > best[0])) best = [m, v];
+  }
+  return best ? best[1] : null;
+}
+
 // Cuadro completo. events = amortizaciones reales; sim (opcional) = hipótesis
-// del simulador {amount, recurring, mode: 'cuota'|'plazo', from: 'YYYY-MM-DD'}.
+// del simulador {amount, recurring, mode: 'cuota'|'plazo', from: 'YYYY-MM-DD'};
+// ctx = {euribor: Map|null} para deudas a tipo variable.
 // Filas: {kind:'cuota', n, date, payment, interest, principal, extra, balance}
 //        {kind:'extra', date, extra, balance}
-export function buildSchedule(debt, events = [], sim = null) {
-  const tin = debt.rate.tin;
-  const i = tin / 100 / 12;
+//        {kind:'review', date, tin, payment, balance}  (revisión de tipo variable)
+export function buildSchedule(debt, events = [], sim = null, ctx = null) {
+  const isVar = debt.rate.type === 'variable';
+  let tin = isVar ? (debt.rate.currentRate ?? debt.rate.spread ?? 0) : debt.rate.tin;
+  let i = tin / 100 / 12;
+  let nextReview = isVar ? debt.rate.nextReview || null : null;
+  const reviewStep = Math.max(1, debt.rate.reviewMonths || 12);
   const evs = events
     .filter((e) => e.debtId === debt.id)
     .map((e) => ({ date: e.date, amount: e.amount, mode: e.mode }))
@@ -76,6 +100,20 @@ export function buildSchedule(debt, events = [], sim = null) {
     }
     if (balance <= 0.005) break;
 
+    // Revisiones de tipo variable que vencen antes de esta cuota: nuevo tipo
+    // (euríbor del mes previo + diferencial) y cuota recalculada manteniendo
+    // la fecha de fin. Sin datos del euríbor se mantiene el tipo vigente.
+    while (isVar && nextReview && nextReview <= date && balance > 0.005) {
+      const eb = euriborAt(ctx?.euribor, nextReview);
+      if (eb != null) {
+        tin = eb + (debt.rate.spread || 0);
+        i = tin / 100 / 12;
+      }
+      payment = frenchPayment(balance, tin, monthsLeft);
+      rows.push({ kind: 'review', date: nextReview, tin, payment, balance });
+      nextReview = addMonths(nextReview, reviewStep, debt.paymentDay);
+    }
+
     const interest = balance * i;
     const due = Math.min(payment, balance + interest);
     const principalPart = Math.max(0, due - interest);
@@ -107,11 +145,12 @@ export function buildSchedule(debt, events = [], sim = null) {
 }
 
 // Estado del préstamo a una fecha: pendiente hoy, cuota vigente, fin, intereses…
-export function loanState(debt, events = [], sim = null, today = todayStr()) {
-  const rows = buildSchedule(debt, events, sim);
+export function loanState(debt, events = [], sim = null, ctx = null, today = todayStr()) {
+  const rows = buildSchedule(debt, events, sim, ctx);
   let balance = debt.principal;
   let interestPaid = 0;
   let paidCuotas = 0;
+  let currentTin = debt.rate.type === 'variable' ? (debt.rate.currentRate ?? debt.rate.spread ?? 0) : debt.rate.tin;
   for (const r of rows) {
     if (r.date > today) break;
     balance = r.balance;
@@ -119,6 +158,7 @@ export function loanState(debt, events = [], sim = null, today = todayStr()) {
       interestPaid += r.interest;
       paidCuotas++;
     }
+    if (r.kind === 'review') currentTin = r.tin;
   }
   const futureCuotas = rows.filter((r) => r.kind === 'cuota' && r.date > today);
   const interestRemaining = futureCuotas.reduce((s, r) => s + r.interest, 0);
@@ -134,15 +174,17 @@ export function loanState(debt, events = [], sim = null, today = todayStr()) {
     interestRemaining,
     totalInterest,
     paidCuotas,
+    currentTin,
+    nextReview: rows.find((r) => r.kind === 'review' && r.date > today) ?? null,
     progress: debt.principal > 0 ? 1 - balance / debt.principal : 1,
   };
 }
 
 // Comparador de amortización anticipada: mismo importe, dos modos.
-export function simulateExtra(debt, events, { amount, recurring }, today = todayStr()) {
-  const base = loanState(debt, events, null, today);
+export function simulateExtra(debt, events, { amount, recurring }, ctx = null, today = todayStr()) {
+  const base = loanState(debt, events, null, ctx, today);
   const scenario = (mode) => {
-    const s = loanState(debt, events, { amount, recurring, mode, from: today }, today);
+    const s = loanState(debt, events, { amount, recurring, mode, from: today }, ctx, today);
     return {
       mode,
       payment: s.currentPayment,

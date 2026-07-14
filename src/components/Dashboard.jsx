@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { assetDailyEurPairs, SEGMENTS, seriesGaps, weeklyCandles } from '../lib/portfolio.js';
-import { loanState } from '../lib/loan.js';
+import { euriborMap, loanState } from '../lib/loan.js';
 import { fmtEur, fmtPct, money } from '../lib/format.js';
 import CandleChart, { RangePicker, rangeCutoff } from './CandleChart.jsx';
 import Donut from './Donut.jsx';
@@ -27,10 +27,10 @@ export default function Dashboard({ onOpenAsset, onOpenDebt, onAdd }) {
   const costTotal = positions.reduce((s, p) => s + (p.costEur ?? 0), 0);
   const pnlTotal = total - costTotal;
 
-  const debtStates = useMemo(
-    () => (data?.debts || []).map((debt) => ({ debt, st: loanState(debt, data.debtEvents) })),
-    [data]
-  );
+  const debtStates = useMemo(() => {
+    const ctx = { euribor: euriborMap(data?.euriborCache) };
+    return (data?.debts || []).map((debt) => ({ debt, st: loanState(debt, data.debtEvents, null, ctx) }));
+  }, [data]);
   const debtTotal = debtStates.reduce((s, x) => s + x.st.balance, 0);
   const net = total - debtTotal;
 

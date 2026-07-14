@@ -34,7 +34,11 @@ export default function AddAsset({ onClose }) {
   const [valuation, setValuation] = useState('');
 
   // Campos de préstamo
+  const [rateType, setRateType] = useState('fixed');
   const [tin, setTin] = useState('');
+  const [spread, setSpread] = useState('');
+  const [reviewMonths, setReviewMonths] = useState('12');
+  const [nextReview, setNextReview] = useState('');
   const [years, setYears] = useState('');
   const [months, setMonths] = useState('');
   const [payDay, setPayDay] = useState('1');
@@ -142,13 +146,27 @@ export default function AddAsset({ onClose }) {
     setErr('');
     const nPrincipal = parseFloat(qty);
     const nTin = parseFloat(tin);
+    const nSpread = parseFloat(spread);
     const termMonths = (parseInt(years || '0', 10) || 0) * 12 + (parseInt(months || '0', 10) || 0);
     const nDay = parseInt(payDay, 10);
+    const isVar = rateType === 'variable';
     if (!name.trim()) return setErr('Ponle un nombre al préstamo.');
     if (!(nPrincipal > 0)) return setErr('Capital pendiente no válido.');
-    if (!(nTin >= 0)) return setErr('TIN no válido.');
+    if (!(nTin >= 0)) return setErr(isVar ? 'Tipo aplicado actual no válido (mira tu última revisión).' : 'TIN no válido.');
+    if (isVar && !(nSpread >= 0)) return setErr('Diferencial no válido.');
+    if (isVar && !/^\d{4}-\d{2}$/.test(nextReview)) return setErr('Falta el mes de la próxima revisión.');
     if (!(termMonths > 0)) return setErr('Plazo restante no válido.');
     if (!(nDay >= 1 && nDay <= 28)) return setErr('Día de cobro entre 1 y 28.');
+    const rate = isVar
+      ? {
+          type: 'variable',
+          index: 'euribor12m',
+          spread: nSpread,
+          reviewMonths: parseInt(reviewMonths, 10),
+          nextReview: `${nextReview}-${String(nDay).padStart(2, '0')}`,
+          currentRate: nTin,
+        }
+      : { type: 'fixed', tin: nTin };
     mutate((d) => {
       d.debts.push({
         id: crypto.randomUUID(),
@@ -158,7 +176,7 @@ export default function AddAsset({ onClose }) {
         startDate: todayStr(),
         termMonths,
         paymentDay: nDay,
-        rate: { type: 'fixed', tin: nTin },
+        rate,
       });
       return d;
     });
@@ -316,9 +334,41 @@ export default function AddAsset({ onClose }) {
               <span className="field-hint">Lo que te queda por pagar ahora, no lo que pediste al principio.</span>
             </label>
             <label>
-              Tipo de interés TIN (% anual, fijo)
-              <input type="number" step="any" min="0" value={tin} onChange={(e) => setTin(e.target.value)} placeholder="2.10" />
+              Tipo de interés
+              <div className="seg-tabs">
+                <button type="button" className={rateType === 'fixed' ? 'chip chip-on' : 'chip'} onClick={() => setRateType('fixed')}>
+                  Fijo
+                </button>
+                <button type="button" className={rateType === 'variable' ? 'chip chip-on' : 'chip'} onClick={() => setRateType('variable')}>
+                  Variable (Euríbor + dif.)
+                </button>
+              </div>
             </label>
+            <label>
+              {rateType === 'variable' ? 'Tipo aplicado actual (% — está en tu última carta de revisión)' : 'TIN (% anual)'}
+              <input type="number" step="any" min="0" value={tin} onChange={(e) => setTin(e.target.value)} placeholder={rateType === 'variable' ? '3.35' : '2.10'} />
+            </label>
+            {rateType === 'variable' && (
+              <>
+                <label>
+                  Diferencial sobre el Euríbor 12M (%)
+                  <input type="number" step="any" min="0" value={spread} onChange={(e) => setSpread(e.target.value)} placeholder="0.55" />
+                </label>
+                <div className="field-pair">
+                  <label>
+                    Revisión cada
+                    <select value={reviewMonths} onChange={(e) => setReviewMonths(e.target.value)}>
+                      <option value="6">6 meses</option>
+                      <option value="12">12 meses</option>
+                    </select>
+                  </label>
+                  <label>
+                    Próxima revisión
+                    <input type="month" value={nextReview} onChange={(e) => setNextReview(e.target.value)} />
+                  </label>
+                </div>
+              </>
+            )}
             <div className="field-pair">
               <label>
                 Plazo restante: años

@@ -21,6 +21,7 @@ const EMPTY_VAULT = () => ({
 function normalizeVault(d) {
   if (!Array.isArray(d.debts)) d.debts = [];
   if (!Array.isArray(d.debtEvents)) d.debtEvents = [];
+  if (!('euriborCache' in d)) d.euriborCache = null;
   if (!d.version || d.version < 2) d.version = 2;
   return d;
 }
@@ -181,15 +182,16 @@ export function BovedaProvider({ children }) {
 
   const doRefresh = useCallback(async () => {
     const d = dataRef.current;
-    if (!d || !d.assets.length) return;
+    if (!d || (!d.assets.length && !d.debts?.length)) return;
     setRefreshing(true);
     try {
-      const { quotes: q, priceCache, fxCache, errors } = await refreshMarket(d);
+      const { quotes: q, priceCache, fxCache, euriborCache, errors } = await refreshMarket(d);
       setQuotes(q);
       setMarketErrors(errors);
       mutate((cur) => {
         cur.priceCache = priceCache;
         cur.fxCache = fxCache;
+        cur.euriborCache = euriborCache;
         return cur;
       });
     } catch (e) {
@@ -202,7 +204,11 @@ export function BovedaProvider({ children }) {
   // Refrescar mercado al abrir y cuando cambia la composición de la cartera.
   useEffect(() => {
     if (stage !== 'open' || !data) return;
-    const sig = JSON.stringify([data.assets.map((a) => a.id).sort(), data.transactions.length]);
+    const sig = JSON.stringify([
+      data.assets.map((a) => a.id).sort(),
+      data.transactions.length,
+      (data.debts || []).map((d) => d.id + (d.rate?.type || '')).sort(),
+    ]);
     if (sig !== refreshSig.current) {
       refreshSig.current = sig;
       doRefresh();

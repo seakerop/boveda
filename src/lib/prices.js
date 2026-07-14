@@ -105,6 +105,28 @@ async function fetchFx(cur) {
   }
 }
 
+// Euríbor 12M, media mensual, del ECB Data Portal (sin key, CORS abierto).
+// Es la referencia que usan las revisiones de hipotecas variables en España.
+async function fetchEuribor() {
+  const url =
+    'https://data-api.ecb.europa.eu/service/data/FM/M.U2.EUR.RT.MM.EURIBOR1YD_.HSTA?format=csvdata&startPeriod=1999-01';
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`BCE ${r.status}`);
+  const lines = (await r.text()).trim().split('\n').slice(1);
+  const monthly = [];
+  for (const line of lines) {
+    // TIME_PERIOD y OBS_VALUE son las columnas 9 y 10; las comas entrecomilladas
+    // del CSV aparecen mucho más a la derecha, así que el split simple es seguro.
+    const cols = line.split(',');
+    const period = cols[8];
+    const val = parseFloat(cols[9]);
+    if (/^\d{4}-\d{2}$/.test(period) && Number.isFinite(val)) monthly.push([period, val]);
+  }
+  monthly.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  if (!monthly.length) throw new Error('el BCE no devolvió datos');
+  return { fetchedAt: Date.now(), monthly, latest: monthly[monthly.length - 1][1] };
+}
+
 // Precio actual de un activo recién elegido, para pre-rellenar el formulario.
 export async function currentPrice(picked) {
   if (picked.type === 'crypto') {
@@ -199,5 +221,16 @@ export async function refreshMarket(data) {
     }
   }
 
-  return { quotes, priceCache, fxCache, errors };
+  // Euríbor solo si hay deudas a tipo variable (caché de 24h).
+  let euriborCache = data.euriborCache || null;
+  const hasVariable = (data.debts || []).some((d) => d.rate?.type === 'variable');
+  if (hasVariable && (!euriborCache?.monthly?.length || Date.now() - euriborCache.fetchedAt > 24 * 3600 * 1000)) {
+    try {
+      euriborCache = await fetchEuribor();
+    } catch (e) {
+      errors.push(`Euríbor: ${e.message}`);
+    }
+  }
+
+  return { quotes, priceCache, fxCache, euriborCache, errors };
 }

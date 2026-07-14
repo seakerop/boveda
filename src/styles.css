@@ -347,3 +347,4 @@ input[type='checkbox'] { width: auto; }
 
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field-pair label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.schedule-review td { color: var(--accent); background: rgba(57, 135, 229, 0.06); }

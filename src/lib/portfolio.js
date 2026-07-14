@@ -2,7 +2,7 @@
 // patrimonio en EUR desde la primera operación, usando los precios cacheados.
 // De la serie diaria se agregan velas semanales (lunes como apertura de semana).
 
-import { buildSchedule } from './loan.js';
+import { buildSchedule, euriborMap } from './loan.js';
 
 export const SEGMENTS = [
   { key: 'crypto', label: 'Cripto', color: '#c98500' },
@@ -111,9 +111,10 @@ export function buildDailySeries(data) {
   const state = perAsset.map((x) => ({ i: 0, qty: 0, cost: 0, lastPrice: null, lastFx: x.fxMap ? null : 1 }));
   // Deudas: cuadro precomputado por préstamo; antes del alta se asume el
   // capital del alta (la deuda existía, solo que sin registrar).
+  const loanCtx = { euribor: euriborMap(data.euriborCache) };
   const perDebt = (data.debts || []).map((debt) => ({
     debt,
-    rows: buildSchedule(debt, data.debtEvents || []),
+    rows: buildSchedule(debt, data.debtEvents || [], null, loanCtx),
     i: 0,
     balance: debt.principal,
   }));
