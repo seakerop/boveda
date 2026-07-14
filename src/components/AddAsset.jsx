@@ -2,18 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { currentPrice, searchCrypto, searchStock, todayStr } from '../lib/prices.js';
 import { fmtEur } from '../lib/format.js';
+import { frenchPayment } from '../lib/loan.js';
 
 const TYPES = [
   { key: 'crypto', label: 'Cripto', emoji: '🪙', hint: 'BTC, ETH… precios de CoinGecko' },
   { key: 'stock', label: 'Bolsa', emoji: '📈', hint: 'Acciones y ETFs, precios de Yahoo' },
   { key: 'realestate', label: 'Inmueble', emoji: '🏠', hint: 'Valoración manual en EUR' },
   { key: 'cash', label: 'Cash', emoji: '💶', hint: 'Cuentas y efectivo' },
+  { key: 'debt', label: 'Préstamo', emoji: '🏦', hint: 'Hipoteca, coche, personal…' },
 ];
 
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'];
 
 export default function AddAsset({ onClose }) {
-  const { mutate } = useBoveda();
+  const { mutate, data } = useBoveda();
   const [type, setType] = useState(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -30,6 +32,13 @@ export default function AddAsset({ onClose }) {
   const [price, setPrice] = useState('');
   const [fee, setFee] = useState('');
   const [valuation, setValuation] = useState('');
+
+  // Campos de préstamo
+  const [tin, setTin] = useState('');
+  const [years, setYears] = useState('');
+  const [months, setMonths] = useState('');
+  const [payDay, setPayDay] = useState('1');
+  const [linkedId, setLinkedId] = useState('');
 
   useEffect(() => {
     if (!type || (type !== 'crypto' && type !== 'stock')) return;
@@ -129,8 +138,42 @@ export default function AddAsset({ onClose }) {
     onClose();
   }
 
+  function saveDebt() {
+    setErr('');
+    const nPrincipal = parseFloat(qty);
+    const nTin = parseFloat(tin);
+    const termMonths = (parseInt(years || '0', 10) || 0) * 12 + (parseInt(months || '0', 10) || 0);
+    const nDay = parseInt(payDay, 10);
+    if (!name.trim()) return setErr('Ponle un nombre al préstamo.');
+    if (!(nPrincipal > 0)) return setErr('Capital pendiente no válido.');
+    if (!(nTin >= 0)) return setErr('TIN no válido.');
+    if (!(termMonths > 0)) return setErr('Plazo restante no válido.');
+    if (!(nDay >= 1 && nDay <= 28)) return setErr('Día de cobro entre 1 y 28.');
+    mutate((d) => {
+      d.debts.push({
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        linkedAssetId: linkedId || null,
+        principal: nPrincipal,
+        startDate: todayStr(),
+        termMonths,
+        paymentDay: nDay,
+        rate: { type: 'fixed', tin: nTin },
+      });
+      return d;
+    });
+    onClose();
+  }
+
   const isMarket = type === 'crypto' || type === 'stock';
-  const showForm = type && (!isMarket || picked);
+  const isDebt = type === 'debt';
+  const showForm = type && !isDebt && (!isMarket || picked);
+  const homes = (data?.assets || []).filter((a) => a.type === 'realestate');
+  const debtTerm = (parseInt(years || '0', 10) || 0) * 12 + (parseInt(months || '0', 10) || 0);
+  const debtPreview =
+    parseFloat(qty) > 0 && parseFloat(tin) >= 0 && debtTerm > 0
+      ? frenchPayment(parseFloat(qty), parseFloat(tin), debtTerm)
+      : null;
 
   return (
     <div className="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -261,7 +304,55 @@ export default function AddAsset({ onClose }) {
             <button className="btn btn-primary" onClick={save}>Guardar</button>
           </div>
         )}
-        {type && !showForm && err && <div className="form-err">{err}</div>}
+        {isDebt && (
+          <div className="form-block">
+            <label>
+              Nombre del préstamo
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Hipoteca casa" />
+            </label>
+            <label>
+              Capital pendiente hoy (EUR)
+              <input type="number" step="any" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="142000" />
+              <span className="field-hint">Lo que te queda por pagar ahora, no lo que pediste al principio.</span>
+            </label>
+            <label>
+              Tipo de interés TIN (% anual, fijo)
+              <input type="number" step="any" min="0" value={tin} onChange={(e) => setTin(e.target.value)} placeholder="2.10" />
+            </label>
+            <div className="field-pair">
+              <label>
+                Plazo restante: años
+                <input type="number" min="0" max="40" value={years} onChange={(e) => setYears(e.target.value)} placeholder="22" />
+              </label>
+              <label>
+                y meses
+                <input type="number" min="0" max="11" value={months} onChange={(e) => setMonths(e.target.value)} placeholder="6" />
+              </label>
+            </div>
+            <label>
+              Día del mes en que se cobra la cuota (1–28)
+              <input type="number" min="1" max="28" value={payDay} onChange={(e) => setPayDay(e.target.value)} />
+            </label>
+            <label>
+              Ligado a un inmueble
+              <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)}>
+                <option value="">Ninguno</option>
+                {homes.map((h) => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
+            </label>
+            {debtPreview != null && (
+              <div className="op-total">
+                Cuota resultante: <strong>{fmtEur(debtPreview)}/mes</strong> durante {debtTerm} meses.
+                Si no coincide con tu cuota real, revisa capital, TIN o plazo.
+              </div>
+            )}
+            {err && <div className="form-err">{err}</div>}
+            <button className="btn btn-primary" onClick={saveDebt}>Guardar</button>
+          </div>
+        )}
+        {type && !showForm && !isDebt && err && <div className="form-err">{err}</div>}
       </div>
     </div>
   );

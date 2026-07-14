@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { assetDailyEurPairs, txMarkers, weeklyFromPairs, SEGMENTS } from '../lib/portfolio.js';
+import { loanState } from '../lib/loan.js';
 import { fmtEur, fmtPct, fmtPrice, fmtQty, money } from '../lib/format.js';
 import { todayStr } from '../lib/prices.js';
 import CandleChart, { RangePicker, rangeCutoff } from './CandleChart.jsx';
@@ -146,6 +147,13 @@ export default function AssetDetail({ assetId, onBack }) {
 
   const markers = useMemo(() => (data ? txMarkers(data, assetId) : []), [data, assetId]);
 
+  // Deudas ligadas a este inmueble → equity = valor − capital pendiente.
+  const linkedDebt = useMemo(() => {
+    const linked = (data?.debts || []).filter((dd) => dd.linkedAssetId === assetId);
+    if (!linked.length) return null;
+    return linked.reduce((s, dd) => s + loanState(dd, data.debtEvents).balance, 0);
+  }, [data, assetId]);
+
   if (!asset) return null;
   const seg = SEGMENTS.find((s) => s.key === asset.type);
   const txs = data.transactions.filter((t) => t.assetId === assetId).sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -192,9 +200,21 @@ export default function AssetDetail({ assetId, onBack }) {
       <section className="card">
         <div className="detail-stats">
           <div>
-            <div className="stat-label">Valor</div>
+            <div className="stat-label">{linkedDebt != null ? 'Valor de mercado' : 'Valor'}</div>
             <div className="stat-big">{money(pos.valueEur, privacy)}</div>
           </div>
+          {linkedDebt != null && (
+            <>
+              <div>
+                <div className="stat-label">Deuda pendiente</div>
+                <div className="stat-big down">−{money(linkedDebt, privacy)}</div>
+              </div>
+              <div>
+                <div className="stat-label">Equity (tuyo de verdad)</div>
+                <div className="stat-big up">{money((pos.valueEur ?? 0) - linkedDebt, privacy)}</div>
+              </div>
+            </>
+          )}
           {!isCash && (
             <div>
               <div className="stat-label">P&L</div>

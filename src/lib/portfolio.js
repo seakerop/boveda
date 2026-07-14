@@ -2,6 +2,8 @@
 // patrimonio en EUR desde la primera operación, usando los precios cacheados.
 // De la serie diaria se agregan velas semanales (lunes como apertura de semana).
 
+import { buildSchedule } from './loan.js';
+
 export const SEGMENTS = [
   { key: 'crypto', label: 'Cripto', color: '#c98500' },
   { key: 'stock', label: 'Bolsa', color: '#3987e5' },
@@ -107,10 +109,18 @@ export function buildDailySeries(data) {
     };
   });
   const state = perAsset.map((x) => ({ i: 0, qty: 0, cost: 0, lastPrice: null, lastFx: x.fxMap ? null : 1 }));
+  // Deudas: cuadro precomputado por préstamo; antes del alta se asume el
+  // capital del alta (la deuda existía, solo que sin registrar).
+  const perDebt = (data.debts || []).map((debt) => ({
+    debt,
+    rows: buildSchedule(debt, data.debtEvents || []),
+    i: 0,
+    balance: debt.principal,
+  }));
   const rows = [];
   const d = new Date(txsAll[0].date + 'T00:00:00Z');
   for (let date = dstr(d); date <= end; d.setUTCDate(d.getUTCDate() + 1), date = dstr(d)) {
-    const row = { date, total: 0, crypto: 0, stock: 0, realestate: 0, cash: 0 };
+    const row = { date, total: 0, crypto: 0, stock: 0, realestate: 0, cash: 0, debt: 0, net: 0 };
     perAsset.forEach((x, k) => {
       const s = state[k];
       while (s.i < x.txs.length && x.txs[s.i].date <= date) {
@@ -135,7 +145,15 @@ export function buildDailySeries(data) {
       }
       row[x.a.type] += v;
     });
+    for (const pd of perDebt) {
+      while (pd.i < pd.rows.length && pd.rows[pd.i].date <= date) {
+        pd.balance = pd.rows[pd.i].balance;
+        pd.i++;
+      }
+      row.debt += pd.balance;
+    }
     row.total = row.crypto + row.stock + row.realestate + row.cash;
+    row.net = row.total - row.debt;
     rows.push(row);
   }
   return rows;

@@ -5,7 +5,7 @@ import { refreshMarket } from './prices.js';
 import { buildDailySeries, computePositions, todayStr } from './portfolio.js';
 
 const EMPTY_VAULT = () => ({
-  version: 1,
+  version: 2,
   settings: { baseCurrency: 'EUR', autoLockMin: 5, lockOnHide: true },
   assets: [],
   transactions: [],
@@ -13,7 +13,17 @@ const EMPTY_VAULT = () => ({
   snapshots: {},
   priceCache: {},
   fxCache: {},
+  debts: [],
+  debtEvents: [],
 });
+
+// Migración de bóvedas anteriores (v1 no tenía deudas).
+function normalizeVault(d) {
+  if (!Array.isArray(d.debts)) d.debts = [];
+  if (!Array.isArray(d.debtEvents)) d.debtEvents = [];
+  if (!d.version || d.version < 2) d.version = 2;
+  return d;
+}
 
 const Ctx = createContext(null);
 export const useBoveda = () => useContext(Ctx);
@@ -105,7 +115,7 @@ export function BovedaProvider({ children }) {
     for (const v of vaults) {
       try {
         const key = await vc.deriveKey(password, vc.unb64(v.salt), v.iter || vc.PBKDF2_ITER);
-        const d = await vc.decryptJson(key, v.iv, v.data);
+        const d = normalizeVault(await vc.decryptJson(key, v.iv, v.data));
         keyRef.current = key;
         idRef.current = v.id;
         saltRef.current = v.salt;

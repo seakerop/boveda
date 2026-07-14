@@ -306,3 +306,44 @@ input[type='checkbox'] { width: auto; }
 .settings .btn { margin-top: 6px; }
 .danger-zone { border-color: rgba(230, 103, 103, 0.35); }
 .danger-zone input { margin-bottom: 10px; }
+
+/* ---------- deudas ---------- */
+.net-breakdown { font-size: 13px; color: var(--ink-2); margin: -4px 0 10px; }
+.debt-progress {
+  flex: 0 0 68px; height: 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08); overflow: hidden;
+}
+.debt-progress > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #199e70, #0ca30c); }
+.debt-progress.big { flex: none; width: 100%; height: 8px; margin-top: 14px; }
+
+.sim-inputs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .sim-grid { grid-template-columns: 1fr; } }
+.sim-card {
+  border: 1px solid var(--border); border-radius: 14px; padding: 14px;
+  background: var(--surface-2); display: flex; flex-direction: column; gap: 8px;
+}
+.sim-best { border-color: rgba(12, 163, 12, 0.55); box-shadow: 0 0 0 1px rgba(12, 163, 12, 0.25); }
+.sim-title { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sim-badge {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+  color: #0ca30c; background: rgba(12, 163, 12, 0.12); padding: 2px 8px; border-radius: 999px;
+}
+.sim-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; color: var(--ink-2); }
+.sim-line strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.table-scroll { max-height: 340px; overflow: auto; margin-top: 10px; border-radius: 10px; }
+.schedule { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.schedule th, .schedule td { padding: 6px 8px; text-align: right; white-space: nowrap; }
+.schedule th:first-child, .schedule td:first-child,
+.schedule th:nth-child(2), .schedule td:nth-child(2) { text-align: left; }
+.schedule thead th {
+  position: sticky; top: 0; background: var(--surface); color: var(--muted);
+  font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.schedule tbody tr { border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+.schedule-past { color: var(--muted); }
+.schedule-extra td { color: #0ca30c; background: rgba(12, 163, 12, 0.06); }
+
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field-pair label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }

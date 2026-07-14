@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard.jsx';
 import AssetDetail from './components/AssetDetail.jsx';
 import AddAsset from './components/AddAsset.jsx';
 import Settings from './components/Settings.jsx';
+import DebtDetail from './components/DebtDetail.jsx';
 
 const PRIVACY_ICON = { normal: '👁', hidden: '🙈', percent: '％' };
 const PRIVACY_TITLE = {
@@ -53,9 +54,14 @@ export default function App() {
       </header>
       <main>
         {view.name === 'dashboard' && (
-          <Dashboard onOpenAsset={(id) => setView({ name: 'asset', id })} onAdd={() => setAdding(true)} />
+          <Dashboard
+            onOpenAsset={(id) => setView({ name: 'asset', id })}
+            onOpenDebt={(id) => setView({ name: 'debt', id })}
+            onAdd={() => setAdding(true)}
+          />
         )}
         {view.name === 'asset' && <AssetDetail assetId={view.id} onBack={() => setView({ name: 'dashboard' })} />}
+        {view.name === 'debt' && <DebtDetail debtId={view.id} onBack={() => setView({ name: 'dashboard' })} />}
         {view.name === 'settings' && <Settings onBack={() => setView({ name: 'dashboard' })} />}
       </main>
       {adding && <AddAsset onClose={() => setAdding(false)} />}
