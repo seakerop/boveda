@@ -73,7 +73,11 @@ function ScenarioCard({ title, sc, best, privacy }) {
         <strong>{fmtMonths(sc.monthsSaved)}</strong>
       </div>
       <div className="sim-line">
-        <span>Ahorras en intereses</span>
+        <span>Pagarás en intereses</span>
+        <strong>{money(sc.interestToPay, privacy)}</strong>
+      </div>
+      <div className="sim-line">
+        <span>Ahorras</span>
         <strong className="up">{money(sc.interestSaved, privacy)}</strong>
       </div>
       <div className="sim-line">
@@ -216,11 +220,15 @@ export default function DebtDetail({ debtId, onBack }) {
               <ScenarioCard title="Reducir cuota" sc={sim.cuota} best={bestKey === 'cuota'} privacy={privacy} />
               <ScenarioCard title="Reducir plazo" sc={sim.plazo} best={bestKey === 'plazo'} privacy={privacy} />
             </div>
-            <div className="chart-note">
-              {recurring
-                ? `Aportando ${fmtEur(nAmount)} extra cada mes desde ahora.`
-                : `Aportación única de ${fmtEur(nAmount)} hoy.`}{' '}
-              Sin tocar nada pagarías {money(st.interestRemaining, privacy)} de intereses hasta {st.endDate?.slice(0, 7)}.
+            <div className="sim-note">
+              {recurring ? (
+                <>Aportando <strong>{money(nAmount, privacy)}</strong> extra cada mes desde ahora.</>
+              ) : (
+                <>Aportación única de <strong>{money(nAmount, privacy)}</strong> hoy.</>
+              )}{' '}
+              Para comparar: sin tocar nada pagarías{' '}
+              <strong className="down">{money(st.interestRemaining, privacy)}</strong> de intereses y acabarías en{' '}
+              <strong>{st.endDate?.slice(0, 7)}</strong>.
             </div>
           </>
         ) : (

@@ -192,6 +192,7 @@ export function simulateExtra(debt, events, { amount, recurring }, ctx = null, t
       remainingMonths: s.remainingMonths,
       monthsSaved: base.remainingMonths - s.remainingMonths,
       interestSaved: base.interestRemaining - s.interestRemaining,
+      interestToPay: s.interestRemaining,
     };
   };
   return { base, cuota: scenario('cuota'), plazo: scenario('plazo') };

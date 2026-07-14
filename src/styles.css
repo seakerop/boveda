@@ -348,3 +348,83 @@ input[type='checkbox'] { width: auto; }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field-pair label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .schedule-review td { color: var(--accent); background: rgba(57, 135, 229, 0.06); }
+
+/* ---------- pulido estético v3 ---------- */
+
+/* transiciones suaves y foco visible en todo */
+button, input, select { transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.12s; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(57, 135, 229, 0.16); }
+
+/* topbar con blur al hacer scroll */
+.topbar {
+  background: rgba(11, 15, 23, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin: 0 -14px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+/* títulos de sección con marca de acento */
+.card-title { display: flex; align-items: center; gap: 8px; }
+.card-title::before {
+  content: '';
+  width: 3px; height: 13px; border-radius: 2px;
+  background: var(--accent); opacity: 0.85; flex: 0 0 auto;
+}
+
+/* botón primario con el gradiente del FAB */
+.btn-primary {
+  background: linear-gradient(135deg, #4a95ef, #2a5fd0);
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(57, 135, 229, 0.25);
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+.btn:hover:not(:disabled):not(.btn-primary):not(.btn-danger) { border-color: rgba(255, 255, 255, 0.2); }
+
+/* chips de delta tintados */
+.delta-up { background: rgba(12, 163, 12, 0.1); }
+.delta-down { background: rgba(230, 103, 103, 0.1); }
+
+/* tarjetas del simulador: más jerarquía y aire */
+.sim-card { gap: 9px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 55%), var(--surface-2); }
+.sim-line { font-size: 13px; }
+.sim-line strong { font-size: 14.5px; }
+.sim-line strong.up { font-size: 16px; }
+.sim-best {
+  background: linear-gradient(180deg, rgba(12, 163, 12, 0.07), transparent 60%), var(--surface-2);
+}
+
+/* nota del simulador: visible, no letra pequeña gris */
+.sim-note {
+  margin-top: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 11px 14px;
+}
+.sim-note strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.sim-note strong.down { color: var(--bad); }
+
+/* stats de detalle: etiquetas uniformes */
+.stat-label { text-transform: uppercase; letter-spacing: 0.7px; font-size: 10.5px; }
+
+/* cabeceras de grupo de posiciones */
+.pos-head { text-transform: uppercase; letter-spacing: 0.6px; font-size: 11.5px; }
+
+/* zebra sutil y scrollbar fino en el cuadro */
+.schedule tbody tr:nth-child(even):not(.schedule-extra):not(.schedule-review) { background: rgba(255, 255, 255, 0.015); }
+.table-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.table-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 99px; }
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* modales más suaves */
+.modal-back { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+
+/* estado vacío con un toque */
+.empty-state p:first-child { font-size: 17px; font-weight: 600; color: var(--ink); }
