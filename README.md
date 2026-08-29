@@ -20,6 +20,14 @@ Extras de paranoia: un botón para ocultar las cifras (o mostrar solo porcentaje
 opción de crear una segunda bóveda con otra contraseña, por si alguien te obliga a
 abrir la app.
 
+Se puede desbloquear con huella o Face ID (WebAuthn con la extensión PRF): el chip
+seguro del dispositivo envuelve la clave de la bóveda y la suelta solo tras verificar
+al usuario. No se guarda nada biométrico y la contraseña sigue pidiéndose cada 14 días
+para que no se olvide. Se activa por dispositivo desde Ajustes y se puede revocar.
+Que quede claro el intercambio: WebAuthn acepta cualquier método de desbloqueo del
+sistema (PIN incluido), así que con la huella activa la bóveda es tan fuerte como tu
+bloqueo de pantalla.
+
 Los precios vienen de Yahoo Finance (histórico completo, a través de un pequeño proxy
 porque no tiene CORS), CoinGecko y el BCE para los tipos de cambio. Ninguna necesita
 API key. La evolución del portfolio se reconstruye desde la primera compra y se pinta
@@ -38,6 +46,5 @@ cuánto ahorras en intereses con cada uno.
 
 ## Pendiente
 
-- Desbloqueo con huella (WebAuthn)
 - El coste de posiciones en divisa extranjera usa el tipo de cambio actual, no el
   del día de compra

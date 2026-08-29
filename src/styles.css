@@ -236,6 +236,9 @@ input[type='checkbox'] { width: auto; }
 .lock-card form { display: flex; flex-direction: column; gap: 12px; }
 .ack { display: flex; gap: 10px; text-align: left; font-size: 12.5px; color: var(--ink-2); align-items: flex-start; }
 .ack input { margin-top: 2px; }
+.btn-bio { width: 100%; margin-top: 10px; background: transparent; border-color: rgba(57, 135, 229, 0.45); color: var(--accent); }
+.btn-bio:hover:not(:disabled) { border-color: var(--accent); background: rgba(57, 135, 229, 0.08); }
+.bio-note { color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
 .lock-actions { margin-top: 16px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .splash { min-height: 100dvh; display: flex; align-items: center; justify-content: center; color: var(--muted); letter-spacing: 2px; }
 

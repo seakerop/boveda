@@ -34,6 +34,97 @@ function PwForm({ label, onSubmit, danger }) {
   );
 }
 
+function BioCard() {
+  const { bioState, bioOn, enableBio, disableBio } = useBoveda();
+  const [pw, setPw] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function run(fn, okMsg, cancelMsg) {
+    setMsg('');
+    setBusy(true);
+    try {
+      await fn();
+      setMsg(okMsg);
+    } catch (e) {
+      if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') {
+        if (cancelMsg) setMsg(cancelMsg);
+      } else {
+        setMsg(String(e.message || e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function activate() {
+    if (pw.length < 8) return setMsg('Escribe tu contraseña maestra para activarla.');
+    run(
+      async () => {
+        await enableBio(pw);
+        setPw('');
+      },
+      '✓ Huella activada en este dispositivo',
+      'Cancelado: la huella NO ha quedado activada. Si el sistema llegó a crear una passkey "Bóveda", puedes borrarla en sus ajustes.'
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="card-title">Desbloqueo con huella</div>
+      {!bioState.avail ? (
+        <p className="muted">Este dispositivo o navegador no soporta huella o Face ID para webs.</p>
+      ) : bioOn ? (
+        <>
+          <p className="muted">
+            Activado en este dispositivo. Tu contraseña sigue funcionando siempre, y cada 14 días
+            se pide igualmente, de recordatorio para que no se te olvide. Recuerda: cualquier
+            método de desbloqueo del dispositivo (huella, cara o su PIN) abre la bóveda.
+          </p>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() =>
+              run(
+                disableBio,
+                '✓ Desactivado. La entrada "Bóveda" puede seguir saliendo en los ajustes de tu sistema: es inofensiva y puedes borrarla desde ahí.'
+              )
+            }
+          >
+            Desactivar en este dispositivo
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="muted">
+            Desbloquea sin teclear la contraseña usando la verificación de tu dispositivo. Ojo:
+            vale cualquier método del sistema — huella, cara o el PIN del equipo —, así que con
+            esto activo la bóveda es tan fuerte como tu bloqueo de pantalla. No se guarda nada
+            biométrico, se activa por dispositivo y bóveda, y la contraseña sigue funcionando
+            siempre (cada 14 días se pide igualmente, para que no se olvide). Al activar, el
+            sistema te pedirá la verificación dos veces seguidas: es normal.
+          </p>
+          <p className="muted">
+            Si usas la cartera señuelo en serio, piénsatelo: la huella crea una passkey visible en
+            el sistema y deja marcada qué bóveda la tiene.
+          </p>
+          <input
+            type="password"
+            placeholder="Tu contraseña maestra"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            aria-label="Contraseña maestra para activar la huella"
+          />
+          <button className="btn btn-primary" disabled={busy} onClick={activate}>
+            {busy ? 'Esperando al sensor…' : 'Activar en este dispositivo'}
+          </button>
+        </>
+      )}
+      {msg && <div className={msg.startsWith('✓') ? 'form-ok' : 'form-err'}>{msg}</div>}
+    </section>
+  );
+}
+
 export default function Settings({ onBack }) {
   const { data, mutate, changePassword, createDecoy, exportBackup, wipeVault, lock } = useBoveda();
   const [confirmWipe, setConfirmWipe] = useState('');
@@ -69,9 +160,14 @@ export default function Settings({ onBack }) {
         <button className="btn" onClick={lock}>Bloquear ahora</button>
       </section>
 
+      <BioCard />
+
       <section className="card">
         <div className="card-title">Cambiar contraseña maestra</div>
-        <p className="muted">Re-cifra toda la bóveda con la nueva contraseña.</p>
+        <p className="muted">
+          Re-cifra toda la bóveda con la nueva contraseña. Si tenías la huella activada, se
+          desactiva y tendrás que volver a activarla.
+        </p>
         <PwForm label="Cambiar contraseña" onSubmit={changePassword} />
       </section>
 

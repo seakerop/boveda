@@ -25,17 +25,21 @@ export function newSalt() {
   return crypto.getRandomValues(new Uint8Array(16));
 }
 
-export async function deriveKey(password, salt, iterations = PBKDF2_ITER) {
+// Derivación en dos pasos (bits → clave) para poder envolver los bits con el
+// desbloqueo por huella. La clave importada sigue siendo no extraíble.
+export async function deriveBits(password, salt, iterations = PBKDF2_ITER) {
   const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, [
-    'deriveKey',
+    'deriveBits',
   ]);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-    material,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
+  return crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, material, 256);
+}
+
+export function keyFromBits(bits) {
+  return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function deriveKey(password, salt, iterations = PBKDF2_ITER) {
+  return keyFromBits(await deriveBits(password, salt, iterations));
 }
 
 export async function encryptJson(key, obj) {

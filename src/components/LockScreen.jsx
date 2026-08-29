@@ -2,13 +2,14 @@ import { useRef, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 
 export default function LockScreen() {
-  const { stage, unlock, createAndOpen, importBackup } = useBoveda();
+  const { stage, unlock, unlockWithBio, bioState, createAndOpen, importBackup } = useBoveda();
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [ack, setAck] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(stage === 'setup');
+  const [bioFails, setBioFails] = useState(0);
   const fileRef = useRef(null);
 
   const setup = stage === 'setup' || creating;
@@ -38,6 +39,19 @@ export default function LockScreen() {
     }
   }
 
+  async function withBio() {
+    setErr('');
+    setBusy(true);
+    const r = await unlockWithBio();
+    setBusy(false);
+    if (!r.ok) {
+      // Un "cancelado" también cuenta: WebAuthn no distingue entre cancelar y
+      // una credencial borrada del sistema, y eso falla en silencio en bucle.
+      setBioFails((c) => c + 1);
+      if (!r.cancelled && r.error) setErr(r.error);
+    }
+  }
+
   async function onImport(e) {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -46,7 +60,7 @@ export default function LockScreen() {
     try {
       await importBackup(f);
       setCreating(false);
-      setErr('Backup importado. Desbloquéalo con su contraseña.');
+      setErr('✓ Backup importado. Desbloquéalo con su contraseña.');
     } catch (e2) {
       setErr(String(e2.message || e2));
     }
@@ -96,11 +110,28 @@ export default function LockScreen() {
               </label>
             </>
           )}
-          {err && <div className="form-err">{err}</div>}
+          {err && <div className={err.startsWith('✓') ? 'form-ok' : 'form-err'}>{err}</div>}
           <button className="btn btn-primary" disabled={busy} type="submit">
             {busy ? 'Descifrando…' : setup ? 'Crear bóveda' : 'Desbloquear'}
           </button>
         </form>
+        {!setup && bioState.ready && (
+          <button className="btn btn-bio" disabled={busy} onClick={withBio}>
+            Entrar con huella
+          </button>
+        )}
+        {!setup && bioState.ready && bioFails >= 2 && (
+          <p className="bio-note">
+            ¿No responde? Entra con tu contraseña. Si la huella sigue sin funcionar, puede que la
+            passkey se borrara del sistema: desactívala y actívala de nuevo en Ajustes.
+          </p>
+        )}
+        {!setup && bioState.expired && (
+          <p className="bio-note">
+            Han pasado 14 días: hoy toca escribir la contraseña, de recordatorio para que no se te
+            olvide. Después la huella vuelve a estar disponible.
+          </p>
+        )}
         <div className="lock-actions">
           <button className="btn-link" onClick={() => fileRef.current?.click()}>
             Importar backup cifrado

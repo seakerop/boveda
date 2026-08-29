@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as db from './db.js';
 import * as vc from './vaultCrypto.js';
+import * as bio from './bioUnlock.js';
 import { refreshMarket } from './prices.js';
 import { buildDailySeries, computePositions, todayStr } from './portfolio.js';
 
@@ -29,9 +30,9 @@ function normalizeVault(d) {
 const Ctx = createContext(null);
 export const useBoveda = () => useContext(Ctx);
 
-async function writeVaultRecord(id, key, data, saltB64) {
+async function writeVaultRecord(id, key, data, saltB64, iter = vc.PBKDF2_ITER, bioObj = null) {
   const { iv, data: ct } = await vc.encryptJson(key, data);
-  await db.putVault({ id, salt: saltB64, iter: vc.PBKDF2_ITER, iv, data: ct });
+  await db.putVault({ id, salt: saltB64, iter, iv, data: ct, ...(bioObj ? { bio: bioObj } : {}) });
 }
 
 export function BovedaProvider({ children }) {
@@ -41,8 +42,14 @@ export function BovedaProvider({ children }) {
   const [refreshing, setRefreshing] = useState(false);
   const [marketErrors, setMarketErrors] = useState([]);
   const [privacy, setPrivacy] = useState('normal'); // normal | hidden | percent
+  // Huella: disponibilidad del dispositivo y estado en la pantalla de bloqueo
+  // (ready = hay bóvedas desbloqueables; expired = las hay pero toca contraseña).
+  const [bioState, setBioState] = useState({ avail: false, ready: false, expired: false });
+  const [bioOn, setBioOn] = useState(false); // la bóveda abierta tiene huella activa
 
   const keyRef = useRef(null);
+  const bioRef = useRef(null); // alta de huella {credId, prfSalt, iv, data, pwAt} del registro abierto
+  const iterRef = useRef(vc.PBKDF2_ITER);
   const idRef = useRef(null);
   const saltRef = useRef(null);
   const dataRef = useRef(null);
@@ -50,17 +57,38 @@ export function BovedaProvider({ children }) {
   const refreshSig = useRef('');
   dataRef.current = data;
 
+  const refreshBio = useCallback(async () => {
+    const avail = await bio.bioSupported();
+    if (!avail) return setBioState({ avail: false, ready: false, expired: false });
+    const vaults = await db.allVaults();
+    const enrolled = vaults.filter((v) => v.bio);
+    const fresh = enrolled.filter((v) => bio.pwFresh(v.bio));
+    setBioState({ avail, ready: fresh.length > 0, expired: !fresh.length && enrolled.length > 0 });
+  }, []);
+
   useEffect(() => {
     db.allVaults().then((v) => setStage(v.length ? 'locked' : 'setup'));
-  }, []);
+    refreshBio();
+  }, [refreshBio]);
+
+  // Con la app bloqueada, recalcular el estado de la huella al volver el foco:
+  // si la ventana de 14 días expira con la pestaña abierta, el botón se retira.
+  useEffect(() => {
+    if (stage !== 'locked') return;
+    const onFocus = () => refreshBio();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [stage, refreshBio]);
 
   const persist = useCallback((d) => {
     const key = keyRef.current;
     const id = idRef.current;
     const salt = saltRef.current;
+    const iter = iterRef.current;
+    const bioObj = bioRef.current;
     if (!key || !id) return;
     saveChain.current = saveChain.current
-      .then(() => writeVaultRecord(id, key, d, salt))
+      .then(() => writeVaultRecord(id, key, d, salt, iter, bioObj))
       .catch((e) => console.error('Error guardando la bóveda:', e));
   }, []);
 
@@ -78,6 +106,8 @@ export function BovedaProvider({ children }) {
 
   const lock = useCallback(() => {
     keyRef.current = null;
+    bioRef.current = null;
+    iterRef.current = vc.PBKDF2_ITER;
     idRef.current = null;
     saltRef.current = null;
     refreshSig.current = '';
@@ -85,8 +115,10 @@ export function BovedaProvider({ children }) {
     setQuotes({});
     setMarketErrors([]);
     setPrivacy('normal');
+    setBioOn(false);
     setStage('locked');
-  }, []);
+    refreshBio();
+  }, [refreshBio]);
 
   async function createVaultRecord(password, initial) {
     const salt = vc.newSalt();
@@ -101,8 +133,11 @@ export function BovedaProvider({ children }) {
   const createAndOpen = useCallback(async (password) => {
     const { id, key, saltB64, d } = await createVaultRecord(password);
     keyRef.current = key;
+    bioRef.current = null;
+    iterRef.current = vc.PBKDF2_ITER;
     idRef.current = id;
     saltRef.current = saltB64;
+    setBioOn(false);
     setData(d);
     setStage('open');
   }, []);
@@ -111,32 +146,112 @@ export function BovedaProvider({ children }) {
     await createVaultRecord(password);
   }, []);
 
+  const openRecord = useCallback((record, key, d) => {
+    keyRef.current = key;
+    bioRef.current = record.bio || null;
+    iterRef.current = record.iter || vc.PBKDF2_ITER;
+    idRef.current = record.id;
+    saltRef.current = record.salt;
+    setBioOn(!!record.bio);
+    setData(d);
+    setStage('open');
+  }, []);
+
   const unlock = useCallback(async (password) => {
     const vaults = await db.allVaults();
     for (const v of vaults) {
       try {
         const key = await vc.deriveKey(password, vc.unb64(v.salt), v.iter || vc.PBKDF2_ITER);
         const d = normalizeVault(await vc.decryptJson(key, v.iv, v.data));
-        keyRef.current = key;
-        idRef.current = v.id;
-        saltRef.current = v.salt;
-        setData(d);
-        setStage('open');
+        // Entrar con contraseña re-arma el recordatorio de la huella (pwAt).
+        if (v.bio) {
+          v.bio = { ...v.bio, pwAt: Date.now() };
+          db.putVault(v).catch(() => {});
+        }
+        openRecord(v, key, d);
         return true;
       } catch {
         // contraseña no válida para esta bóveda: probar la siguiente
       }
     }
     return false;
-  }, []);
+  }, [openRecord]);
+
+  // Desbloqueo con huella: una verificación contra las bóvedas con huella
+  // vigente; la que responda se abre. Sin registros vigentes no hay botón.
+  const unlockWithBio = useCallback(async () => {
+    try {
+      const vaults = await db.allVaults();
+      const fresh = vaults.filter((v) => v.bio && bio.pwFresh(v.bio));
+      if (!fresh.length) {
+        refreshBio(); // retira el botón y muestra la nota de los 14 días
+        return { ok: false, error: 'Hoy toca escribir la contraseña.' };
+      }
+      const { record, keyBits } = await bio.bioUnlock(fresh);
+      const key = await vc.keyFromBits(keyBits);
+      const d = normalizeVault(await vc.decryptJson(key, record.iv, record.data));
+      openRecord(record, key, d);
+      return { ok: true };
+    } catch (e) {
+      if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') return { ok: false, cancelled: true };
+      return { ok: false, error: bio.bioErrMsg(e) };
+    }
+  }, [openRecord, refreshBio]);
+
+  // Activar la huella exige la contraseña maestra en el momento: confirma que
+  // el dueño la sabe (y por eso re-arma pwAt), y evita retener los bits de la
+  // clave en memoria durante toda la sesión.
+  const enableBio = useCallback(async (password) => {
+    await saveChain.current; // que el registro leído refleje escrituras encoladas
+    const rec = await db.getVault(idRef.current);
+    if (!rec) throw new Error('No se encontró la bóveda.');
+    let bits;
+    try {
+      bits = await vc.deriveBits(password, vc.unb64(rec.salt), rec.iter || vc.PBKDF2_ITER);
+      await vc.decryptJson(await vc.keyFromBits(bits), rec.iv, rec.data);
+    } catch {
+      throw new Error('Contraseña incorrecta.');
+    }
+    const enrolled = await bio.enrollBio(bits);
+    bioRef.current = { ...enrolled, pwAt: Date.now() };
+    setBioOn(true);
+    persist(dataRef.current);
+    refreshBio();
+  }, [persist, refreshBio]);
+
+  const disableBio = useCallback(async () => {
+    bioRef.current = null;
+    setBioOn(false);
+    // Por la cadena de guardado: un persist en vuelo no debe re-escribir la huella.
+    saveChain.current = saveChain.current.then(async () => {
+      const rec = await db.getVault(idRef.current);
+      if (rec?.bio) {
+        delete rec.bio;
+        await db.putVault(rec);
+      }
+    });
+    await saveChain.current;
+    refreshBio();
+  }, [refreshBio]);
 
   const changePassword = useCallback(async (newPassword) => {
     const salt = vc.newSalt();
     const key = await vc.deriveKey(newPassword, salt);
     keyRef.current = key;
     saltRef.current = vc.b64(salt);
-    await writeVaultRecord(idRef.current, key, dataRef.current, saltRef.current);
-  }, []);
+    iterRef.current = vc.PBKDF2_ITER;
+    // La clave cambia, así que la envoltura de la huella deja de valer:
+    // se desactiva y hay que volver a activarla desde Ajustes.
+    bioRef.current = null;
+    setBioOn(false);
+    // Por la cadena de guardado: un persist encolado con la clave vieja (y su
+    // huella) no debe aterrizar después y resucitar la contraseña anterior.
+    const id = idRef.current;
+    const saltB64 = saltRef.current;
+    saveChain.current = saveChain.current.then(() => writeVaultRecord(id, key, dataRef.current, saltB64));
+    await saveChain.current;
+    refreshBio();
+  }, [refreshBio]);
 
   const exportBackup = useCallback(async () => {
     const rec = await db.getVault(idRef.current);
@@ -165,20 +280,36 @@ export function BovedaProvider({ children }) {
     if (j.format !== 'boveda-backup' || !j.salt || !j.iv || !j.data) {
       throw new Error('El archivo no es un backup de Bóveda válido');
     }
-    await db.putVault({ id: crypto.randomUUID(), salt: j.salt, iter: j.iter || vc.PBKDF2_ITER, iv: j.iv, data: j.data });
+    const iter = j.iter || vc.PBKDF2_ITER;
+    // Si la bóveda de origen sigue en este dispositivo (misma sal), restaurar
+    // encima en vez de duplicarla: la contraseña es la misma, así que la
+    // huella que tuviera sigue valiendo (envuelve la clave, no los datos).
+    const vaults = await db.allVaults();
+    const twin = vaults.find((v) => v.salt === j.salt && (v.iter || vc.PBKDF2_ITER) === iter);
+    if (twin) {
+      await db.putVault({ ...twin, iv: j.iv, data: j.data });
+    } else {
+      await db.putVault({ id: crypto.randomUUID(), salt: j.salt, iter, iv: j.iv, data: j.data });
+    }
     setStage('locked');
   }, []);
 
   const wipeVault = useCallback(async () => {
-    await db.deleteVault(idRef.current);
-    const rest = await db.allVaults();
-    keyRef.current = null;
+    const id = idRef.current;
+    keyRef.current = null; // corta nuevos persists antes de borrar
+    bioRef.current = null;
     idRef.current = null;
     saltRef.current = null;
+    // Por la cadena: un persist ya encolado no debe re-crear la bóveda borrada.
+    saveChain.current = saveChain.current.then(() => db.deleteVault(id));
+    await saveChain.current;
+    const rest = await db.allVaults();
     setData(null);
     setQuotes({});
+    setBioOn(false);
     setStage(rest.length ? 'locked' : 'setup');
-  }, []);
+    refreshBio();
+  }, [refreshBio]);
 
   const doRefresh = useCallback(async () => {
     const d = dataRef.current;
@@ -280,6 +411,11 @@ export function BovedaProvider({ children }) {
     privacy,
     cyclePrivacy,
     unlock,
+    unlockWithBio,
+    bioState,
+    bioOn,
+    enableBio,
+    disableBio,
     createAndOpen,
     createDecoy,
     lock,
