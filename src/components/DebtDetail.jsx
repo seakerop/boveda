@@ -1,55 +1,71 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
-import { euriborMap, loanState, simulateExtra, todayStr } from '../lib/loan.js';
-import { fmtEur, fmtPct, money } from '../lib/format.js';
+import { euriborMap, loanState, paymentBeforeReview, simulateExtra, todayStr } from '../lib/loan.js';
+import { fmtEur, fmtRate, money, moneySigned, parseNum } from '../lib/format.js';
+import { fmtDate, fmtMonthYear } from '../lib/dates.js';
+import useModal from './useModal.js';
+import Icon from './Icon.jsx';
+import NumberInput from './NumberInput.jsx';
 
 const fmtMonths = (m) => {
   if (m <= 0) return '0 meses';
   const y = Math.floor(m / 12);
   const r = m % 12;
   if (!y) return `${r} ${r === 1 ? 'mes' : 'meses'}`;
-  return r ? `${y} a ${r} m` : `${y} ${y === 1 ? 'año' : 'años'}`;
+  const years = `${y} ${y === 1 ? 'año' : 'años'}`;
+  return r ? `${years} y ${r} ${r === 1 ? 'mes' : 'meses'}` : years;
 };
 
 function RegisterModal({ debt, onClose }) {
-  const { mutate } = useBoveda();
+  const { data, mutate, notify } = useBoveda();
+  useModal(onClose);
   const [date, setDate] = useState(todayStr());
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('plazo');
   const [err, setErr] = useState('');
   function save() {
-    const n = parseFloat(amount);
+    const n = parseNum(amount, { money: true });
     if (!(n > 0)) return setErr('Importe no válido.');
-    if (!date) return setErr('Falta la fecha.');
+    if (!date || date > todayStr()) return setErr('Fecha no válida.');
+    if (date < debt.startDate) return setErr(`La fecha es anterior al alta del préstamo (${fmtDate(debt.startDate)}).`);
+    const pending = loanState(debt, data.debtEvents, null, { euribor: euriborMap(data.euriborCache) }, date).balance;
+    if (n > pending + 0.01) return setErr(`En esa fecha solo quedaban ${fmtEur(pending)} por pagar.`);
     mutate((d) => {
       d.debtEvents.push({ id: crypto.randomUUID(), debtId: debt.id, date, amount: n, mode });
       return d;
     });
+    notify('Amortización registrada', { kind: 'ok' });
     onClose();
   }
   return (
     <div className="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Registrar amortización">
         <div className="modal-head">
           <h2>Registrar amortización</h2>
-          <button className="btn-icon" aria-label="Cerrar" onClick={onClose}>✕</button>
+          <button className="btn-icon" aria-label="Cerrar" onClick={onClose}>
+            <Icon name="close" />
+          </button>
         </div>
         <div className="form-block">
           <label>
             Fecha
-            <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" value={date} min={debt.startDate} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
           </label>
           <label>
-            Importe (EUR)
-            <input type="number" step="any" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus placeholder="5000" />
+            Importe (€)
+            <NumberInput value={amount} onChange={setAmount} autoFocus placeholder="5.000" />
           </label>
-          <label>
-            Qué elegiste en el banco
-            <div className="seg-tabs">
-              <button className={mode === 'plazo' ? 'chip chip-on' : 'chip'} onClick={() => setMode('plazo')}>Reducir plazo</button>
-              <button className={mode === 'cuota' ? 'chip chip-on' : 'chip'} onClick={() => setMode('cuota')}>Reducir cuota</button>
+          <div className="field-group">
+            <span className="field-label">Qué elegiste en el banco</span>
+            <div className="seg-group seg-full">
+              <button className={mode === 'plazo' ? 'seg seg-on' : 'seg'} aria-pressed={mode === 'plazo'} onClick={() => setMode('plazo')}>
+                Reducir plazo
+              </button>
+              <button className={mode === 'cuota' ? 'seg seg-on' : 'seg'} aria-pressed={mode === 'cuota'} onClick={() => setMode('cuota')}>
+                Reducir cuota
+              </button>
             </div>
-          </label>
+          </div>
           {err && <div className="form-err">{err}</div>}
           <button className="btn btn-primary" onClick={save}>Guardar</button>
         </div>
@@ -82,14 +98,14 @@ function ScenarioCard({ title, sc, best, privacy }) {
       </div>
       <div className="sim-line">
         <span>Terminas en</span>
-        <strong>{sc.endDate?.slice(0, 7) ?? '—'}</strong>
+        <strong>{fmtMonthYear(sc.endDate)}</strong>
       </div>
     </div>
   );
 }
 
 export default function DebtDetail({ debtId, onBack }) {
-  const { data, privacy, mutate } = useBoveda();
+  const { data, privacy, mutate, notify } = useBoveda();
   const [amount, setAmount] = useState('');
   const [recurring, setRecurring] = useState(false);
   const [modal, setModal] = useState(false);
@@ -112,7 +128,7 @@ export default function DebtDetail({ debtId, onBack }) {
     };
   }, [debt, events, st, ctx]);
 
-  const nAmount = parseFloat(amount);
+  const nAmount = parseNum(amount, { money: true });
   const sim = useMemo(
     () => (debt && nAmount > 0 ? simulateExtra(debt, data.debtEvents, { amount: nAmount, recurring }, ctx) : null),
     [debt, data, nAmount, recurring, ctx]
@@ -121,20 +137,40 @@ export default function DebtDetail({ debtId, onBack }) {
 
   if (!debt || !st) return null;
   const linked = debt.linkedAssetId ? data.assets.find((a) => a.id === debt.linkedAssetId) : null;
+  const hidePct = privacy === 'hidden';
+  const before = st.nextReview ? paymentBeforeReview(st) : null;
+  const reviewDiff = before != null ? st.nextReview.payment - before : null;
   const futureRows = st.rows.filter((r) => r.date > todayStr());
 
-  function delEvent(id) {
+  function delEvent(ev) {
     mutate((d) => {
-      d.debtEvents = d.debtEvents.filter((e) => e.id !== id);
+      d.debtEvents = d.debtEvents.filter((e) => e.id !== ev.id);
       return d;
+    });
+    notify('Amortización borrada', {
+      undo: () =>
+        mutate((d) => {
+          if (!d.debtEvents.some((e) => e.id === ev.id)) d.debtEvents.push(ev);
+          return d;
+        }),
     });
   }
   function delDebt() {
     if (!window.confirm(`¿Eliminar ${debt.name} y su historial?`)) return;
+    const removedEvents = data.debtEvents.filter((e) => e.debtId === debtId);
     mutate((d) => {
       d.debts = d.debts.filter((x) => x.id !== debtId);
       d.debtEvents = d.debtEvents.filter((e) => e.debtId !== debtId);
       return d;
+    });
+    notify(`${debt.name} eliminado`, {
+      undo: () =>
+        mutate((d) => {
+          if (d.debts.some((x) => x.id === debtId)) return d;
+          d.debts.push(debt);
+          d.debtEvents.push(...removedEvents);
+          return d;
+        }),
     });
     onBack();
   }
@@ -142,15 +178,18 @@ export default function DebtDetail({ debtId, onBack }) {
   return (
     <div className="detail">
       <div className="detail-head">
-        <button className="btn-icon" aria-label="Volver" onClick={onBack}>←</button>
-        <div>
-          <div className="detail-title">
-            <span className="dot" style={{ background: '#e66767' }} /> {debt.name}
-          </div>
+        <button className="btn-icon" aria-label="Volver" onClick={onBack}>
+          <Icon name="back" />
+        </button>
+        <span className="avatar avatar-debt avatar-lg" aria-hidden="true">
+          <Icon name="bank" size={19} />
+        </span>
+        <div className="detail-titles">
+          <div className="detail-title">{debt.name}</div>
           <div className="detail-sub">
             {debt.rate.type === 'variable'
-              ? `Euríbor 12M + ${debt.rate.spread}% · revisión cada ${debt.rate.reviewMonths} meses · tipo actual ${st.currentTin.toFixed(2)}%`
-              : `TIN ${debt.rate.tin}% fijo`}
+              ? `Euríbor 12M + ${fmtRate(debt.rate.spread)} · revisión cada ${debt.rate.reviewMonths} meses · tipo actual ${fmtRate(st.currentTin)}`
+              : `TIN ${fmtRate(debt.rate.tin)} fijo`}
             {' · '}cuota el día {debt.paymentDay}
             {linked ? ` · ligado a ${linked.name}` : ''}
           </div>
@@ -158,40 +197,38 @@ export default function DebtDetail({ debtId, onBack }) {
       </div>
 
       <section className="card">
-        <div className="detail-stats">
-          <div>
-            <div className="stat-label">Capital pendiente</div>
-            <div className="stat-big down">−{money(st.balance, privacy)}</div>
-          </div>
-          <div>
+        <div className="stat-hero">
+          <div className="stat-label">Capital pendiente</div>
+          <div className="stat-hero-value down">−{money(st.balance, privacy)}</div>
+        </div>
+        <div className="stats-grid">
+          <div className="stat">
             <div className="stat-label">Cuota</div>
-            <div className="stat-mid">{st.currentPayment != null ? `${money(st.currentPayment, privacy)}/mes` : '—'}</div>
+            <div className="stat-value">{st.currentPayment != null ? `${money(st.currentPayment, privacy)}/mes` : '—'}</div>
           </div>
-          <div>
+          <div className="stat">
             <div className="stat-label">Te queda</div>
-            <div className="stat-mid">{fmtMonths(st.remainingMonths)} · fin {st.endDate?.slice(0, 7)}</div>
+            <div className="stat-value">{fmtMonths(st.remainingMonths)}</div>
+            <div className="stat-sub">Fin en {fmtMonthYear(st.endDate)}</div>
           </div>
-          <div>
-            <div className="stat-label">Intereses restantes</div>
-            <div className="stat-mid">{money(st.interestRemaining, privacy)}</div>
+          <div className="stat">
+            <div className="stat-label">Intereses por pagar</div>
+            <div className="stat-value">{money(st.interestRemaining, privacy)}</div>
           </div>
         </div>
-        <div className="debt-progress big" title={`${Math.round(st.progress * 100)}% amortizado desde el alta`}>
-          <div style={{ width: `${Math.min(100, Math.round(st.progress * 100))}%` }} />
+        <div className="debt-progress big" title={hidePct ? undefined : `${Math.round(st.progress * 100)}% amortizado desde el alta`}>
+          <div style={{ width: hidePct ? 0 : `${Math.min(100, Math.round(st.progress * 100))}%` }} />
         </div>
         <div className="chart-note">
-          {Math.round(st.progress * 100)}% amortizado desde el alta · próxima cuota el {st.nextPaymentDate}
+          {!hidePct && `${Math.round(st.progress * 100)}% amortizado desde el alta · `}próxima cuota el {fmtDate(st.nextPaymentDate)}
         </div>
         {debt.rate.type === 'variable' && st.nextReview && (
           <div className="op-total" style={{ marginTop: 12 }}>
-            Próxima revisión el <strong>{st.nextReview.date}</strong>: con el euríbor de hoy el tipo pasaría
-            al <strong>{st.nextReview.tin.toFixed(2)}%</strong> y la cuota a{' '}
+            Próxima revisión el <strong>{fmtDate(st.nextReview.date)}</strong>: con el euríbor de hoy el tipo pasaría
+            al <strong>{fmtRate(st.nextReview.tin)}</strong> y la cuota a{' '}
             <strong>{money(st.nextReview.payment, privacy)}/mes</strong>
-            {st.currentPayment != null && privacy === 'normal' && (
-              <span className={st.nextReview.payment > st.currentPayment ? 'down' : 'up'}>
-                {' '}({st.nextReview.payment > st.currentPayment ? '+' : ''}
-                {fmtEur(st.nextReview.payment - st.currentPayment)})
-              </span>
+            {reviewDiff != null && Math.abs(reviewDiff) >= 0.5 && privacy === 'normal' && (
+              <span className={reviewDiff > 0 ? 'down' : 'up'}> ({moneySigned(reviewDiff, privacy)} al mes)</span>
             )}
             .
           </div>
@@ -201,17 +238,16 @@ export default function DebtDetail({ debtId, onBack }) {
       <section className="card sim-section">
         <div className="card-title">Simulador de amortización anticipada</div>
         <div className="sim-inputs">
-          <input
-            type="number"
-            step="any"
-            min="0"
-            placeholder="¿Cuánto quieres amortizar? (EUR)"
+          <NumberInput
+            placeholder="¿Cuánto quieres amortizar?"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={setAmount}
+            suffix="€"
+            aria-label="Importe a amortizar"
           />
-          <div className="seg-tabs">
-            <button className={!recurring ? 'chip chip-on' : 'chip'} onClick={() => setRecurring(false)}>Aportación única</button>
-            <button className={recurring ? 'chip chip-on' : 'chip'} onClick={() => setRecurring(true)}>Todos los meses</button>
+          <div className="seg-group seg-full">
+            <button className={!recurring ? 'seg seg-on' : 'seg'} aria-pressed={!recurring} onClick={() => setRecurring(false)}>Aportación única</button>
+            <button className={recurring ? 'seg seg-on' : 'seg'} aria-pressed={recurring} onClick={() => setRecurring(true)}>Todos los meses</button>
           </div>
         </div>
         {sim ? (
@@ -228,7 +264,7 @@ export default function DebtDetail({ debtId, onBack }) {
               )}{' '}
               Para comparar: sin tocar nada pagarías{' '}
               <strong className="down">{money(st.interestRemaining, privacy)}</strong> de intereses y acabarías en{' '}
-              <strong>{st.endDate?.slice(0, 7)}</strong>.
+              <strong>{fmtMonthYear(st.endDate)}</strong>.
             </div>
           </>
         ) : (
@@ -237,7 +273,9 @@ export default function DebtDetail({ debtId, onBack }) {
       </section>
 
       <div className="detail-actions">
-        <button className="btn btn-primary" onClick={() => setModal(true)}>Registrar amortización real</button>
+        <button className="btn btn-primary" onClick={() => setModal(true)}>
+          <Icon name="plus" size={18} /> Registrar amortización real
+        </button>
       </div>
 
       {events.length > 0 && (
@@ -252,10 +290,16 @@ export default function DebtDetail({ debtId, onBack }) {
           )}
           {events.map((e) => (
             <div key={e.id} className="tx-row">
-              <span className="tx-date">{e.date}</span>
-              <span className="tx-desc">{e.mode === 'plazo' ? 'Reducir plazo' : 'Reducir cuota'}</span>
+              <span className="tx-date">{fmtDate(e.date)}</span>
+              <span className="tx-main">
+                <span className="tx-desc">{e.mode === 'plazo' ? 'Reducir plazo' : 'Reducir cuota'}</span>
+              </span>
               <span className="tx-amount">{money(e.amount, privacy)}</span>
-              <button className="btn-icon danger" aria-label="Borrar amortización" onClick={() => delEvent(e.id)}>🗑</button>
+              <span className="tx-actions">
+                <button className="btn-icon sm danger" aria-label="Borrar amortización" onClick={() => delEvent(e)}>
+                  <Icon name="trash" size={16} />
+                </button>
+              </span>
             </div>
           ))}
         </section>
@@ -276,23 +320,23 @@ export default function DebtDetail({ debtId, onBack }) {
                   r.kind === 'extra' ? (
                     <tr key={i} className="schedule-extra">
                       <td>★</td>
-                      <td>{r.date}</td>
+                      <td>{fmtDate(r.date)}</td>
                       <td colSpan={3}>Amortización anticipada de {privacy === 'normal' ? fmtEur(r.extra) : '•••'}</td>
                       <td>{privacy === 'normal' ? fmtEur(r.balance) : '•••'}</td>
                     </tr>
                   ) : r.kind === 'review' ? (
                     <tr key={i} className="schedule-review">
                       <td>↻</td>
-                      <td>{r.date}</td>
+                      <td>{fmtDate(r.date)}</td>
                       <td colSpan={3}>
-                        Revisión: tipo {r.tin.toFixed(2)}% → cuota {privacy === 'normal' ? `${fmtEur(r.payment)}/mes` : '•••'}
+                        Revisión: tipo {fmtRate(r.tin)} → cuota {privacy === 'normal' ? `${fmtEur(r.payment)}/mes` : '•••'}
                       </td>
                       <td>{privacy === 'normal' ? fmtEur(r.balance) : '•••'}</td>
                     </tr>
                   ) : (
                     <tr key={i} className={r.date > todayStr() ? '' : 'schedule-past'}>
                       <td>{r.n}</td>
-                      <td>{r.date}</td>
+                      <td>{fmtDate(r.date)}</td>
                       <td>{privacy === 'normal' ? fmtEur(r.payment) : '•••'}</td>
                       <td>{privacy === 'normal' ? fmtEur(r.interest) : '•••'}</td>
                       <td>{privacy === 'normal' ? fmtEur(r.principal + r.extra) : '•••'}</td>
@@ -306,7 +350,9 @@ export default function DebtDetail({ debtId, onBack }) {
         </details>
       </section>
 
-      <button className="btn btn-danger" onClick={delDebt}>Eliminar préstamo</button>
+      <button className="btn btn-danger btn-block" onClick={delDebt}>
+        <Icon name="trash" size={18} /> Eliminar préstamo
+      </button>
 
       {modal && <RegisterModal debt={debt} onClose={() => setModal(false)} />}
     </div>

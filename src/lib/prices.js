@@ -1,18 +1,22 @@
 // Fuentes de precios (todas gratuitas, sin key):
-//  - Crypto: CoinGecko (histórico diario en EUR + precio actual). CORS abierto.
+//  - Crypto: CoinGecko (búsqueda + precio actual en EUR) e histórico de Yahoo.
 //  - Bolsa: Yahoo Finance vía nuestro proxy /api/yahoo (histórico completo + cotización).
-//  - Divisas: frankfurter.dev (BCE, serie diaria histórica). CORS abierto.
+//  - Divisas: frankfurter.dev (BCE, serie diaria histórica), Yahoo de respaldo.
 // Las cantidades del usuario NUNCA viajan en estas peticiones: solo tickers públicos.
+
+import { todayStr } from './dates.js';
+import { fxBase } from './ledger.js';
+
+export { todayStr };
 
 const CG = 'https://api.coingecko.com/api/v3';
 const STALE_MS = 12 * 3600 * 1000;
 
 const msToDate = (ms) => new Date(ms).toISOString().slice(0, 10);
-export const todayStr = () => new Date().toISOString().slice(0, 10);
 
 async function getJson(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url.split('?')[0]} → ${r.status}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
@@ -41,8 +45,10 @@ export async function searchStock(q) {
     }));
 }
 
-async function fetchYahooDaily(symbol) {
-  const now = Math.floor(Date.now() / 1000);
+export async function fetchYahooDaily(symbol) {
+  // Hasta el final del día UTC en curso: la URL es la misma todo el día y la
+  // caché del servidor (5 min) puede servirla en vez de preguntar a Yahoo.
+  const now = Math.ceil(Date.now() / 86400000) * 86400;
   const j = await getJson(
     `/api/yahoo?fn=chart&symbol=${encodeURIComponent(symbol)}&interval=1d&period1=0&period2=${now}`
   );
@@ -50,10 +56,11 @@ async function fetchYahooDaily(symbol) {
   if (!res) throw new Error(j?.chart?.error?.description || `sin datos para ${symbol}`);
   const ts = res.timestamp || [];
   const close = res.indicators?.quote?.[0]?.close || [];
-  const daily = [];
+  const map = new Map();
   for (let i = 0; i < ts.length; i++) {
-    if (close[i] != null) daily.push([msToDate(ts[i] * 1000), close[i]]);
+    if (close[i] != null) map.set(msToDate(ts[i] * 1000), close[i]);
   }
+  const daily = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   if (!daily.length) throw new Error(`histórico vacío para ${symbol}`);
   return { fetchedAt: Date.now(), currency: res.meta?.currency || 'USD', daily };
 }
@@ -72,16 +79,14 @@ async function fetchCryptoHistory(asset) {
   const j = await getJson(`${CG}/coins/${encodeURIComponent(asset.cgId)}/market_chart?vs_currency=eur&days=365`);
   const map = new Map();
   for (const [ms, p] of j.prices || []) map.set(msToDate(ms), p);
-  if (!map.size) throw new Error(`sin histórico para ${asset.cgId}`);
-  return { fetchedAt: Date.now(), currency: 'EUR', daily: [...map.entries()] };
+  if (!map.size) throw new Error('sin histórico');
+  return { fetchedAt: Date.now(), currency: 'EUR', daily: [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)) };
 }
-
-const fetchStockHistory = fetchYahooDaily;
 
 async function fetchStockQuote(ySymbol) {
   const j = await getJson(`/api/yahoo?fn=chart&symbol=${encodeURIComponent(ySymbol)}&interval=1d&range=5d`);
   const res = j?.chart?.result?.[0];
-  if (!res) throw new Error(`sin cotización para ${ySymbol}`);
+  if (!res) throw new Error('sin cotización');
   return {
     price: res.meta?.regularMarketPrice ?? null,
     prevClose: res.meta?.chartPreviousClose ?? null,
@@ -89,18 +94,19 @@ async function fetchStockQuote(ySymbol) {
   };
 }
 
-async function fetchFx(cur) {
+// Serie diaria de EUR por unidad de `code` (código ISO, sin subunidades).
+export async function fetchFx(code) {
   // Primero frankfurter (BCE, directo desde el cliente); si la red lo bloquea,
   // respaldo vía nuestro proxy de Yahoo con el par USDEUR=X (mismo formato daily).
   try {
-    const j = await getJson(`https://api.frankfurter.dev/v1/2000-01-01..?base=${encodeURIComponent(cur)}&symbols=EUR`);
+    const j = await getJson(`https://api.frankfurter.dev/v1/2000-01-01..?base=${encodeURIComponent(code)}&symbols=EUR`);
     const daily = Object.entries(j.rates || {})
       .map(([d, o]) => [d, o.EUR])
       .sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    if (!daily.length) throw new Error(`sin FX para ${cur}`);
+    if (!daily.length) throw new Error(`sin FX para ${code}`);
     return { fetchedAt: Date.now(), daily, latest: daily[daily.length - 1][1] };
-  } catch (e) {
-    const h = await fetchYahooDaily(`${cur}EUR=X`);
+  } catch {
+    const h = await fetchYahooDaily(`${code}EUR=X`);
     return { fetchedAt: h.fetchedAt, daily: h.daily, latest: h.daily[h.daily.length - 1][1] };
   }
 }
@@ -146,6 +152,30 @@ function mergeToday(cache, price, currency) {
   cache.daily = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 
+// Índices para comparar la cartera (cotizan en EUR, en Ámsterdam y Xetra).
+export const BENCHMARKS = [
+  { symbol: 'IWDA.AS', label: 'MSCI World' },
+  { symbol: 'SXR8.DE', label: 'S&P 500' },
+  { symbol: 'BTC-EUR', label: 'Bitcoin' },
+];
+
+// Divisas (código ISO) que necesita la cartera: las de las operaciones y las de
+// los precios. Subunidades como GBp se resuelven a su código base (GBP).
+function neededCurrencies(data, priceCache) {
+  const curs = new Set();
+  const add = (c) => {
+    if (!c) return;
+    const { code } = fxBase(c);
+    if (code !== 'EUR') curs.add(code);
+  };
+  for (const a of data.assets) {
+    add(a.currency);
+    add(priceCache[a.id]?.currency);
+  }
+  for (const b of Object.values(data.benchCache || {})) add(b?.currency);
+  return curs;
+}
+
 // Actualiza cachés (histórico si >12h) y devuelve cotizaciones actuales.
 // Cada activo falla de forma aislada: sin red se sigue con lo cacheado.
 export async function refreshMarket(data) {
@@ -157,43 +187,38 @@ export async function refreshMarket(data) {
 
   const cryptos = data.assets.filter((a) => a.type === 'crypto');
   const stocks = data.assets.filter((a) => a.type === 'stock');
-  const curs = new Set(data.assets.map((a) => a.currency).filter((c) => c && c !== 'EUR'));
 
   for (const a of cryptos) {
     if (stale(priceCache[a.id])) {
       try {
         priceCache[a.id] = await fetchCryptoHistory(a);
       } catch (e) {
-        errors.push(`${a.symbol}: ${e.message}`);
+        errors.push(`${a.symbol}: histórico no disponible (${e.message})`);
       }
     }
   }
   for (const a of stocks) {
     if (stale(priceCache[a.id])) {
       try {
-        priceCache[a.id] = await fetchStockHistory(a.ySymbol);
+        priceCache[a.id] = await fetchYahooDaily(a.ySymbol);
       } catch (e) {
-        errors.push(`${a.symbol}: ${e.message}`);
+        errors.push(`${a.symbol}: histórico no disponible (${e.message})`);
       }
     }
   }
-  for (const a of [...cryptos, ...stocks]) {
-    const cur = priceCache[a.id]?.currency;
-    if (cur && cur !== 'EUR') curs.add(cur);
-  }
-  for (const cur of curs) {
+  for (const cur of neededCurrencies(data, priceCache)) {
     if (stale(fxCache[cur])) {
       try {
         fxCache[cur] = await fetchFx(cur);
       } catch (e) {
-        errors.push(`FX ${cur}: ${e.message}`);
+        errors.push(`Cambio ${cur}→EUR no disponible (${e.message})`);
       }
     }
   }
 
   if (cryptos.length) {
     try {
-      const ids = cryptos.map((a) => a.cgId).join(',');
+      const ids = [...new Set(cryptos.map((a) => a.cgId))].join(',');
       const j = await getJson(`${CG}/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=eur&include_24hr_change=true`);
       for (const a of cryptos) {
         const q = j[a.cgId];
@@ -202,7 +227,7 @@ export async function refreshMarket(data) {
         mergeToday(priceCache[a.id], q.eur, 'EUR');
       }
     } catch (e) {
-      errors.push(`crypto: ${e.message}`);
+      errors.push(`Precios cripto no disponibles (${e.message})`);
     }
   }
   for (const a of stocks) {
@@ -211,13 +236,13 @@ export async function refreshMarket(data) {
       if (q.price != null) {
         quotes[a.id] = {
           price: q.price,
-          change24h: q.prevClose ? ((q.price / q.prevClose) - 1) * 100 : null,
+          change24h: q.prevClose ? (q.price / q.prevClose - 1) * 100 : null,
           currency: q.currency,
         };
         mergeToday(priceCache[a.id], q.price, q.currency);
       }
     } catch (e) {
-      errors.push(`${a.symbol}: ${e.message}`);
+      errors.push(`${a.symbol}: cotización no disponible (${e.message})`);
     }
   }
 
@@ -228,9 +253,24 @@ export async function refreshMarket(data) {
     try {
       euriborCache = await fetchEuribor();
     } catch (e) {
-      errors.push(`Euríbor: ${e.message}`);
+      errors.push(`Euríbor no disponible (${e.message})`);
     }
   }
 
   return { quotes, priceCache, fxCache, euriborCache, errors };
+}
+
+// Índice de comparación, cacheado 12 h como cualquier histórico.
+export async function ensureBenchmark(symbol, benchCache, fxCache) {
+  const nextBench = { ...(benchCache || {}) };
+  const nextFx = { ...(fxCache || {}) };
+  const c = nextBench[symbol];
+  if (!c || Date.now() - c.fetchedAt > STALE_MS || !c.daily?.length) {
+    nextBench[symbol] = await fetchYahooDaily(symbol);
+  }
+  const { code } = fxBase(nextBench[symbol].currency);
+  if (code !== 'EUR' && (!nextFx[code] || Date.now() - nextFx[code].fetchedAt > STALE_MS)) {
+    nextFx[code] = await fetchFx(code);
+  }
+  return { benchCache: nextBench, fxCache: nextFx };
 }

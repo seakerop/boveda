@@ -4,8 +4,11 @@
 // avanza solo con el paso del tiempo. Interés mensual = TIN/12/100; se ignora
 // el día exacto dentro del mes (simplificación estándar de los cuadros).
 
+import { todayStr } from './dates.js';
+
+export { todayStr };
+
 const dstr = (d) => d.toISOString().slice(0, 10);
-export const todayStr = () => dstr(new Date());
 const clampDay = (day) => Math.min(Math.max(1, day || 1), 28);
 
 function addMonths(dateStr, k, day) {
@@ -90,7 +93,8 @@ export function buildSchedule(debt, events = [], sim = null, ctx = null) {
       if (ev.mode === 'cuota') payment = frenchPayment(balance, tin, monthsLeft);
       else monthsLeft = Math.min(monthsLeft, monthsToRepay(balance, tin, payment));
     }
-    rows.push({ kind: 'extra', date: ev.date, extra: applied, balance, sim: !!ev.sim });
+    // payment: la cuota que queda en vigor tras esta amortización.
+    rows.push({ kind: 'extra', date: ev.date, extra: applied, balance, payment, sim: !!ev.sim });
   };
 
   while (balance > 0.005 && guard++ < 1500) {
@@ -178,6 +182,20 @@ export function loanState(debt, events = [], sim = null, ctx = null, today = tod
     nextReview: rows.find((r) => r.kind === 'review' && r.date > today) ?? null,
     progress: debt.principal > 0 ? 1 - balance / debt.principal : 1,
   };
+}
+
+// Cuota en vigor justo ANTES de una revisión, para compararla con la nueva: la de
+// la última cuota anterior a la revisión según el cuadro (que ya refleja las
+// amortizaciones anticipadas). Así la diferencia es solo efecto del nuevo tipo.
+export function paymentBeforeReview(st) {
+  const r = st.nextReview;
+  if (!r) return st.currentPayment;
+  let prev = null;
+  for (const x of st.rows) {
+    if (x.date >= r.date) break;
+    if ((x.kind === 'cuota' || x.kind === 'extra' || x.kind === 'review') && x.payment != null) prev = x.payment;
+  }
+  return prev;
 }
 
 // Comparador de amortización anticipada: mismo importe, dos modos.

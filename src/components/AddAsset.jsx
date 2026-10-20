@@ -1,28 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
-import { currentPrice, searchCrypto, searchStock, todayStr } from '../lib/prices.js';
-import { fmtEur } from '../lib/format.js';
+import { currentPrice, searchCrypto, searchStock } from '../lib/prices.js';
+import { fmtEur, fmtPrice, fmtQty, numToInput, parseNum, roundSig } from '../lib/format.js';
 import { frenchPayment } from '../lib/loan.js';
+import { fxAt, fxBase } from '../lib/ledger.js';
+import { SEGMENTS } from '../lib/portfolio.js';
+import { todayStr } from '../lib/dates.js';
+import useModal from './useModal.js';
+import Icon from './Icon.jsx';
+import NumberInput from './NumberInput.jsx';
+
+const SEG_COLOR = Object.fromEntries(SEGMENTS.map((s) => [s.key, s.color]));
 
 const TYPES = [
-  { key: 'crypto', label: 'Cripto', emoji: '🪙', hint: 'BTC, ETH… precios de CoinGecko' },
-  { key: 'stock', label: 'Bolsa', emoji: '📈', hint: 'Acciones y ETFs, precios de Yahoo' },
-  { key: 'realestate', label: 'Inmueble', emoji: '🏠', hint: 'Valoración manual en EUR' },
-  { key: 'cash', label: 'Cash', emoji: '💶', hint: 'Cuentas y efectivo' },
-  { key: 'debt', label: 'Préstamo', emoji: '🏦', hint: 'Hipoteca, coche, personal…' },
+  { key: 'crypto', label: 'Cripto', icon: 'coins', hint: 'Bitcoin, Ethereum… precio automático' },
+  { key: 'stock', label: 'Bolsa', icon: 'chart', hint: 'Acciones, ETF y fondos' },
+  { key: 'realestate', label: 'Inmueble', icon: 'home', hint: 'Valoración manual' },
+  { key: 'cash', label: 'Cash', icon: 'wallet', hint: 'Cuentas y efectivo' },
+  { key: 'debt', label: 'Préstamo', icon: 'bank', hint: 'Hipoteca, coche, personal…' },
 ];
 
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF'];
 
 export default function AddAsset({ onClose }) {
-  const { mutate, data } = useBoveda();
+  const { mutate, data, notify } = useBoveda();
+  useModal(onClose);
   const [type, setType] = useState(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [picked, setPicked] = useState(null); // resultado de búsqueda o {manual}
+  const [picked, setPicked] = useState(null);
   const [err, setErr] = useState('');
   const timer = useRef(null);
+  // Respuestas lentas de una búsqueda o cotización anterior no deben pisar la actual.
+  const searchSeq = useRef(0);
+  const pickSeq = useRef(0);
+  const [quoteState, setQuoteState] = useState('idle'); // idle | loading | ok | error
 
   // Campos del formulario final
   const [name, setName] = useState('');
@@ -30,6 +43,7 @@ export default function AddAsset({ onClose }) {
   const [date, setDate] = useState(todayStr());
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
+  const [priceCur, setPriceCur] = useState('');
   const [fee, setFee] = useState('');
   const [valuation, setValuation] = useState('');
 
@@ -52,21 +66,24 @@ export default function AddAsset({ onClose }) {
       return;
     }
     timer.current = setTimeout(async () => {
+      const seq = ++searchSeq.current;
       setSearching(true);
       setErr('');
       try {
         const r = type === 'crypto' ? await searchCrypto(query.trim()) : await searchStock(query.trim());
-        setResults(r);
+        if (seq === searchSeq.current) setResults(r);
       } catch (e) {
-        setErr('Error buscando: ' + String(e.message || e));
+        if (seq === searchSeq.current) setErr('No se pudo buscar: ' + String(e.message || e));
       } finally {
-        setSearching(false);
+        if (seq === searchSeq.current) setSearching(false);
       }
     }, 350);
     return () => clearTimeout(timer.current);
   }, [query, type]);
 
   function reset() {
+    pickSeq.current++;
+    setQuoteState('idle');
     setPicked(null);
     setQuery('');
     setResults([]);
@@ -75,41 +92,64 @@ export default function AddAsset({ onClose }) {
     setPriceCur('');
   }
 
-  const [priceCur, setPriceCur] = useState('');
-
   // Al elegir un activo, pre-rellenar el precio con la cotización actual
   // (editable: si la compra fue en otra fecha, pon el precio de aquel día).
   function pick(r) {
+    const seq = ++pickSeq.current;
     setPicked(r);
+    setQuoteState('loading');
+    if (r.type === 'crypto') setPriceCur('EUR');
     currentPrice(r)
       .then((q) => {
+        if (seq !== pickSeq.current) return;
         if (q.price != null) {
-          setPrice(String(q.price));
+          setPrice(numToInput(roundSig(q.price)));
           setPriceCur(q.currency);
-        }
+          setQuoteState('ok');
+        } else setQuoteState('error');
       })
-      .catch(() => {});
+      .catch(() => seq === pickSeq.current && setQuoteState('error'));
   }
+
+  const isMarket = type === 'crypto' || type === 'stock';
+  const txCur = type === 'crypto' ? 'EUR' : type === 'stock' ? priceCur || '' : type === 'cash' ? currency : 'EUR';
+  const fxDay =
+    !txCur || txCur === 'EUR'
+      ? 1
+      : data.fxCache?.[fxBase(txCur).code]?.daily?.length
+        ? fxAt(data.fxCache, txCur, date)
+        : null;
+
+  const nQty = parseNum(qty);
+  const nPrice = parseNum(price, { money: true });
+  const nFee = fee ? parseNum(fee, { money: true }) : 0;
+  const nCash = parseNum(qty, { money: true });
 
   function save() {
     setErr('');
-    const nQty = parseFloat(qty);
-    const nPrice = parseFloat(price);
-    const nFee = fee ? parseFloat(fee) : 0;
-    const isMarket = type === 'crypto' || type === 'stock';
+    const nVal = valuation ? parseNum(valuation, { money: true }) : null;
 
     if (type === 'cash') {
       if (!name.trim()) return setErr('Ponle un nombre a la cuenta.');
-      if (!(nQty > 0)) return setErr('Importe inicial no válido.');
+      if (!(nCash > 0)) return setErr('Importe inicial no válido.');
     } else if (type === 'realestate') {
       if (!name.trim()) return setErr('Ponle un nombre al inmueble.');
       if (!(nPrice > 0)) return setErr('Precio de compra no válido.');
+      if (valuation && !(nVal > 0)) return setErr('Valoración no válida.');
     } else {
       if (!picked) return setErr('Busca y elige un activo.');
+      if (type === 'stock' && !priceCur) return setErr('Elige la divisa en la que cotiza.');
       if (!(nQty > 0)) return setErr('Cantidad no válida.');
       if (!(nPrice > 0)) return setErr('Precio no válido.');
     }
-    if (!date) return setErr('Falta la fecha.');
+    if (!(nFee >= 0)) return setErr('Comisión no válida.');
+    if (!date || date > todayStr()) return setErr('Fecha no válida.');
+    if (type === 'stock' && data.assets.some((a) => a.type === 'stock' && a.ySymbol === picked.ySymbol)) {
+      return setErr(`Ya tienes ${picked.symbol}: añade la compra desde su ficha.`);
+    }
+    if (type === 'crypto' && data.assets.some((a) => a.type === 'crypto' && a.cgId === picked.cgId)) {
+      return setErr(`Ya tienes ${picked.symbol}: añade la compra desde su ficha.`);
+    }
 
     const assetId = crypto.randomUUID();
     const asset = {
@@ -117,20 +157,21 @@ export default function AddAsset({ onClose }) {
       type,
       name: isMarket ? picked.name : name.trim(),
       symbol: isMarket ? picked.symbol : name.trim().slice(0, 14),
-      cgId: picked?.cgId,
-      ySymbol: picked?.ySymbol,
-      currency: type === 'cash' ? currency : type === 'realestate' ? 'EUR' : undefined,
+      ...(picked?.cgId ? { cgId: picked.cgId } : {}),
+      ...(picked?.ySymbol ? { ySymbol: picked.ySymbol } : {}),
+      ...(type === 'cash' ? { currency } : {}),
+      ...(type === 'stock' && priceCur ? { currency: priceCur } : {}),
     };
     const tx = {
       id: crypto.randomUUID(),
       assetId,
       kind: 'buy',
       date,
-      qty: type === 'realestate' ? 1 : nQty,
-      price: type === 'cash' ? 1 : type === 'realestate' ? nPrice : nPrice,
-      fee: nFee,
+      qty: type === 'realestate' ? 1 : type === 'cash' ? nCash : nQty,
+      price: type === 'cash' ? 1 : nPrice,
+      fee: type === 'cash' ? 0 : nFee,
+      ...(txCur && txCur !== 'EUR' && fxDay > 0 && type !== 'cash' ? { fxRate: fxDay } : {}),
     };
-    const nVal = valuation ? parseFloat(valuation) : null;
     mutate((d) => {
       d.assets.push(asset);
       d.transactions.push(tx);
@@ -139,23 +180,25 @@ export default function AddAsset({ onClose }) {
       }
       return d;
     });
+    notify(`${asset.name} añadido`, { kind: 'ok' });
     onClose();
   }
 
   function saveDebt() {
     setErr('');
-    const nPrincipal = parseFloat(qty);
-    const nTin = parseFloat(tin);
-    const nSpread = parseFloat(spread);
+    const nPrincipal = parseNum(qty, { money: true });
+    const nTin = parseNum(tin);
+    const nSpread = parseNum(spread);
     const termMonths = (parseInt(years || '0', 10) || 0) * 12 + (parseInt(months || '0', 10) || 0);
     const nDay = parseInt(payDay, 10);
     const isVar = rateType === 'variable';
     if (!name.trim()) return setErr('Ponle un nombre al préstamo.');
     if (!(nPrincipal > 0)) return setErr('Capital pendiente no válido.');
-    if (!(nTin >= 0)) return setErr(isVar ? 'Tipo aplicado actual no válido (mira tu última revisión).' : 'TIN no válido.');
+    if (!(nTin >= 0) || nTin > 30) return setErr(isVar ? 'Tipo aplicado actual no válido (mira tu última revisión).' : 'TIN no válido.');
     if (isVar && !(nSpread >= 0)) return setErr('Diferencial no válido.');
     if (isVar && !/^\d{4}-\d{2}$/.test(nextReview)) return setErr('Falta el mes de la próxima revisión.');
-    if (!(termMonths > 0)) return setErr('Plazo restante no válido.');
+    if (isVar && nextReview < todayStr().slice(0, 7)) return setErr('La próxima revisión no puede estar en el pasado.');
+    if (!(termMonths > 0) || termMonths > 600) return setErr('Plazo restante no válido.');
     if (!(nDay >= 1 && nDay <= 28)) return setErr('Día de cobro entre 1 y 28.');
     const rate = isVar
       ? {
@@ -180,32 +223,47 @@ export default function AddAsset({ onClose }) {
       });
       return d;
     });
+    notify(`${name.trim()} añadido`, { kind: 'ok' });
     onClose();
   }
 
-  const isMarket = type === 'crypto' || type === 'stock';
   const isDebt = type === 'debt';
   const showForm = type && !isDebt && (!isMarket || picked);
   const homes = (data?.assets || []).filter((a) => a.type === 'realestate');
   const debtTerm = (parseInt(years || '0', 10) || 0) * 12 + (parseInt(months || '0', 10) || 0);
-  const debtPreview =
-    parseFloat(qty) > 0 && parseFloat(tin) >= 0 && debtTerm > 0
-      ? frenchPayment(parseFloat(qty), parseFloat(tin), debtTerm)
-      : null;
+  const pPrincipal = parseNum(qty, { money: true });
+  const pTin = parseNum(tin);
+  const debtPreview = pPrincipal > 0 && pTin >= 0 && debtTerm > 0 ? frenchPayment(pPrincipal, pTin, debtTerm) : null;
+  const typeInfo = TYPES.find((t) => t.key === type);
+  const curLabel = !txCur ? 'divisa del activo' : txCur === 'EUR' ? '€' : txCur === 'GBp' || txCur === 'GBX' ? 'peniques, GBp' : txCur;
 
   return (
     <div className="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Añadir">
         <div className="modal-head">
-          <h2>Añadir activo</h2>
-          <button className="btn-icon" aria-label="Cerrar" onClick={onClose}>✕</button>
+          {type ? (
+            <button className="btn-icon" aria-label="Cambiar tipo" onClick={() => { setType(null); reset(); }}>
+              <Icon name="back" />
+            </button>
+          ) : null}
+          <h2>{typeInfo ? `Añadir ${typeInfo.label.toLowerCase()}` : 'Añadir'}</h2>
+          <button className="btn-icon" aria-label="Cerrar" onClick={onClose}>
+            <Icon name="close" />
+          </button>
         </div>
 
         {!type && (
           <div className="type-grid">
             {TYPES.map((t) => (
-              <button key={t.key} className="type-card" onClick={() => setType(t.key)}>
-                <span className="type-emoji">{t.emoji}</span>
+              <button
+                key={t.key}
+                className="type-card"
+                style={{ '--seg': t.key === 'debt' ? 'var(--bad)' : SEG_COLOR[t.key] }}
+                onClick={() => setType(t.key)}
+              >
+                <span className="type-icon">
+                  <Icon name={t.icon} size={20} />
+                </span>
                 <span className="type-label">{t.label}</span>
                 <span className="type-hint">{t.hint}</span>
               </button>
@@ -220,6 +278,7 @@ export default function AddAsset({ onClose }) {
               placeholder={type === 'crypto' ? 'Busca: bitcoin, ethereum…' : 'Busca: Apple, MSCI World, TEF.MC…'}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-label="Buscar activo"
             />
             {searching && <div className="muted">Buscando…</div>}
             <div className="search-results">
@@ -231,7 +290,7 @@ export default function AddAsset({ onClose }) {
                 </button>
               ))}
             </div>
-            <button className="btn-link" onClick={() => setType(null)}>← Cambiar tipo</button>
+            {err && <div className="form-err">{err}</div>}
           </div>
         )}
 
@@ -239,23 +298,30 @@ export default function AddAsset({ onClose }) {
           <div className="form-block">
             {isMarket ? (
               <div className="picked-row">
-                <strong>{picked.symbol}</strong> {picked.name}
-                <button className="btn-link" onClick={reset}>cambiar</button>
+                <strong>{picked.symbol}</strong> <span className="search-name">{picked.name}</span>
+                <button className="btn-text" onClick={reset}>
+                  Cambiar
+                </button>
               </div>
             ) : (
               <label>
                 {type === 'cash' ? 'Nombre de la cuenta' : 'Nombre del inmueble'}
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={type === 'cash' ? 'Cuenta ING' : 'Piso Calle Mayor'} />
+                <input
+                  autoFocus
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={type === 'cash' ? 'Cuenta ING' : 'Piso Calle Mayor'}
+                />
               </label>
             )}
 
             <label>
-              Fecha de {type === 'cash' ? 'ingreso' : 'compra'}
+              Fecha de {type === 'cash' ? 'apertura' : 'compra'}
               <input type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} />
             </label>
 
             {type === 'cash' && (
-              <>
+              <div className="field-pair">
                 <label>
                   Divisa
                   <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
@@ -265,61 +331,77 @@ export default function AddAsset({ onClose }) {
                   </select>
                 </label>
                 <label>
-                  Importe inicial
-                  <input type="number" step="any" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="1000" />
+                  Saldo inicial
+                  <NumberInput value={qty} onChange={setQty} placeholder="1.000" />
                 </label>
-              </>
+              </div>
             )}
 
             {type === 'realestate' && (
               <>
                 <label>
-                  Precio de compra (EUR)
-                  <input type="number" step="any" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="200000" />
+                  Precio de compra (€)
+                  <NumberInput value={price} onChange={setPrice} placeholder="200.000" />
                 </label>
                 <label>
-                  Gastos de compra (EUR, opcional)
-                  <input type="number" step="any" min="0" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="20000" />
+                  Gastos de compra (€, opcional)
+                  <NumberInput value={fee} onChange={setFee} placeholder="20.000" />
+                  <span className="field-hint">Impuestos, notaría, registro, gestoría: suman al coste.</span>
                 </label>
                 <label>
-                  Valoración actual (EUR, opcional)
-                  <input type="number" step="any" min="0" value={valuation} onChange={(e) => setValuation(e.target.value)} placeholder="230000" />
+                  Valoración actual (€, opcional)
+                  <NumberInput value={valuation} onChange={setValuation} placeholder="230.000" />
                 </label>
               </>
             )}
 
             {isMarket && (
               <>
+                {type === 'stock' && quoteState === 'error' && (
+                  <label>
+                    Divisa en la que cotiza
+                    <select value={priceCur} onChange={(e) => setPriceCur(e.target.value)}>
+                      <option value="">Elige…</option>
+                      {['EUR', 'USD', 'GBP', 'GBp', 'CHF', 'CAD', 'JPY'].map((c) => (
+                        <option key={c} value={c}>
+                          {c === 'GBp' ? 'GBp (peniques, Londres)' : c}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="field-hint">No he podido consultar la cotización: dime en qué moneda está el precio.</span>
+                  </label>
+                )}
                 <label>
                   Cantidad
-                  <input type="number" step="any" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0.05" />
+                  <NumberInput value={qty} onChange={setQty} placeholder="0,05" />
                 </label>
                 <label>
-                  Precio por unidad ({priceCur || (type === 'crypto' ? 'EUR' : 'divisa del activo')})
-                  <input type="number" step="any" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="60000" />
-                  <span className="field-hint">
-                    Pre-rellenado con el precio de hoy — si compraste otro día, cámbialo por el precio de aquel día.
-                  </span>
+                  Precio por unidad ({curLabel})
+                  <NumberInput value={price} onChange={setPrice} placeholder="60.000" />
+                  {quoteState === 'ok' && (
+                    <span className="field-hint">Prerrellenado con el precio de hoy. Si compraste otro día, pon el de aquel día.</span>
+                  )}
+                  {quoteState === 'loading' && <span className="field-hint">Consultando el precio de hoy…</span>}
                 </label>
                 <label>
-                  Comisión (opcional)
-                  <input type="number" step="any" min="0" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="1.50" />
+                  Comisión ({curLabel}, opcional)
+                  <NumberInput value={fee} onChange={setFee} placeholder="1,50" />
                 </label>
               </>
             )}
 
-            {isMarket && parseFloat(qty) > 0 && parseFloat(price) > 0 && (
+            {isMarket && nQty > 0 && nPrice > 0 && (
               <div className="op-total">
                 Vas a registrar una compra de{' '}
-                <strong>
-                  {fmtEur(parseFloat(qty) * parseFloat(price) + (parseFloat(fee) || 0))}
-                  {priceCur && priceCur !== 'EUR' ? ` (${priceCur})` : ''}
-                </strong>{' '}
-                — {parseFloat(qty)} unidades. Si esa cifra no cuadra con lo que invertiste, revisa cantidad y precio.
+                <strong>{fmtPrice(nQty * nPrice + (nFee || 0), txCur || 'EUR')}</strong>
+                {txCur && txCur !== 'EUR' && fxDay > 0 && <> (≈ {fmtEur((nQty * nPrice + (nFee || 0)) * fxDay)})</>} por{' '}
+                {fmtQty(nQty)} unidades. Si esa cifra no cuadra con lo que invertiste, revisa cantidad y precio.
               </div>
             )}
             {err && <div className="form-err">{err}</div>}
-            <button className="btn btn-primary" onClick={save}>Guardar</button>
+            <button className="btn btn-primary" onClick={save}>
+              Guardar
+            </button>
           </div>
         )}
         {isDebt && (
@@ -329,30 +411,40 @@ export default function AddAsset({ onClose }) {
               <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Hipoteca casa" />
             </label>
             <label>
-              Capital pendiente hoy (EUR)
-              <input type="number" step="any" min="0" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="142000" />
+              Capital pendiente hoy (€)
+              <NumberInput value={qty} onChange={setQty} placeholder="142.000" />
               <span className="field-hint">Lo que te queda por pagar ahora, no lo que pediste al principio.</span>
             </label>
-            <label>
-              Tipo de interés
-              <div className="seg-tabs">
-                <button type="button" className={rateType === 'fixed' ? 'chip chip-on' : 'chip'} onClick={() => setRateType('fixed')}>
+            <div className="field-group">
+              <span className="field-label">Tipo de interés</span>
+              <div className="seg-group seg-full">
+                <button
+                  type="button"
+                  className={rateType === 'fixed' ? 'seg seg-on' : 'seg'}
+                  aria-pressed={rateType === 'fixed'}
+                  onClick={() => setRateType('fixed')}
+                >
                   Fijo
                 </button>
-                <button type="button" className={rateType === 'variable' ? 'chip chip-on' : 'chip'} onClick={() => setRateType('variable')}>
-                  Variable (Euríbor + dif.)
+                <button
+                  type="button"
+                  className={rateType === 'variable' ? 'seg seg-on' : 'seg'}
+                  aria-pressed={rateType === 'variable'}
+                  onClick={() => setRateType('variable')}
+                >
+                  Variable (euríbor)
                 </button>
               </div>
-            </label>
+            </div>
             <label>
-              {rateType === 'variable' ? 'Tipo aplicado actual (% — está en tu última carta de revisión)' : 'TIN (% anual)'}
-              <input type="number" step="any" min="0" value={tin} onChange={(e) => setTin(e.target.value)} placeholder={rateType === 'variable' ? '3.35' : '2.10'} />
+              {rateType === 'variable' ? 'Tipo aplicado actual (%, está en tu última carta de revisión)' : 'TIN (% anual)'}
+              <NumberInput value={tin} onChange={setTin} placeholder={rateType === 'variable' ? '3,35' : '2,10'} suffix="%" />
             </label>
             {rateType === 'variable' && (
               <>
                 <label>
-                  Diferencial sobre el Euríbor 12M (%)
-                  <input type="number" step="any" min="0" value={spread} onChange={(e) => setSpread(e.target.value)} placeholder="0.55" />
+                  Diferencial sobre el euríbor 12M
+                  <NumberInput value={spread} onChange={setSpread} placeholder="0,55" suffix="%" />
                 </label>
                 <div className="field-pair">
                   <label>
@@ -372,37 +464,40 @@ export default function AddAsset({ onClose }) {
             <div className="field-pair">
               <label>
                 Plazo restante: años
-                <input type="number" min="0" max="40" value={years} onChange={(e) => setYears(e.target.value)} placeholder="22" />
+                <input type="number" min="0" max="40" inputMode="numeric" value={years} onChange={(e) => setYears(e.target.value)} placeholder="22" />
               </label>
               <label>
                 y meses
-                <input type="number" min="0" max="11" value={months} onChange={(e) => setMonths(e.target.value)} placeholder="6" />
+                <input type="number" min="0" max="11" inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value)} placeholder="6" />
               </label>
             </div>
             <label>
               Día del mes en que se cobra la cuota (1–28)
-              <input type="number" min="1" max="28" value={payDay} onChange={(e) => setPayDay(e.target.value)} />
+              <input type="number" min="1" max="28" inputMode="numeric" value={payDay} onChange={(e) => setPayDay(e.target.value)} />
             </label>
             <label>
               Ligado a un inmueble
               <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)}>
                 <option value="">Ninguno</option>
                 {homes.map((h) => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
                 ))}
               </select>
             </label>
             {debtPreview != null && (
               <div className="op-total">
-                Cuota resultante: <strong>{fmtEur(debtPreview)}/mes</strong> durante {debtTerm} meses.
-                Si no coincide con tu cuota real, revisa capital, TIN o plazo.
+                Cuota resultante: <strong>{fmtEur(debtPreview)}/mes</strong> durante {debtTerm} meses. Si no coincide con
+                tu cuota real, revisa capital, TIN o plazo.
               </div>
             )}
             {err && <div className="form-err">{err}</div>}
-            <button className="btn btn-primary" onClick={saveDebt}>Guardar</button>
+            <button className="btn btn-primary" onClick={saveDebt}>
+              Guardar
+            </button>
           </div>
         )}
-        {type && !showForm && !isDebt && err && <div className="form-err">{err}</div>}
       </div>
     </div>
   );

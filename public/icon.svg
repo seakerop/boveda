@@ -1,7 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0b0f17"/>
-  <rect x="88" y="88" width="336" height="336" rx="72" fill="none" stroke="#3987e5" stroke-width="30"/>
-  <circle cx="256" cy="256" r="84" fill="none" stroke="#3987e5" stroke-width="30"/>
-  <line x1="256" y1="256" x2="256" y2="196" stroke="#3987e5" stroke-width="30" stroke-linecap="round"/>
-  <line x1="256" y1="256" x2="306" y2="286" stroke="#3987e5" stroke-width="30" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151f30"/>
+      <stop offset="1" stop-color="#0a0e15"/>
+    </linearGradient>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#6aa8f7"/>
+      <stop offset="1" stop-color="#3b6fe0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="url(#g)" stroke-width="30" stroke-linecap="round">
+    <rect x="100" y="100" width="312" height="312" rx="80"/>
+    <circle cx="256" cy="256" r="78"/>
+    <line x1="256" y1="256" x2="256" y2="200"/>
+    <line x1="256" y1="256" x2="304" y2="284"/>
+  </g>
 </svg>

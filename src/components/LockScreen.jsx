@@ -1,5 +1,29 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
+import Icon from './Icon.jsx';
+import PasswordMeter, { pwStrength } from './PasswordMeter.jsx';
+
+// Marca de la app: el dial de la caja fuerte.
+export function BrandMark({ size = 28 }) {
+  const g = `bm${useId().replace(/:/g, '')}`;
+  const stroke = `url(#${g})`;
+  return (
+    <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden="true" className="brand-svg">
+      <defs>
+        {/* userSpaceOnUse: con el degradado relativo a la caja, la aguja vertical
+            (caja de ancho cero) no se pintaría. */}
+        <linearGradient id={g} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
+          <stop offset="0" stopColor="#6aa8f7" />
+          <stop offset="1" stopColor="#3b6fe0" />
+        </linearGradient>
+      </defs>
+      <rect x="5" y="5" width="38" height="38" rx="11" fill="none" stroke={stroke} strokeWidth="3.4" />
+      <circle cx="24" cy="24" r="9" fill="none" stroke={stroke} strokeWidth="3.4" />
+      <line x1="24" y1="24" x2="24" y2="17.5" stroke={stroke} strokeWidth="3.4" strokeLinecap="round" />
+      <line x1="24" y1="24" x2="29.5" y2="27.2" stroke={stroke} strokeWidth="3.4" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export default function LockScreen() {
   const { stage, unlock, unlockWithBio, bioState, createAndOpen, importBackup } = useBoveda();
@@ -21,6 +45,9 @@ export default function LockScreen() {
       if (pw.length < 8) return setErr('La contraseña debe tener al menos 8 caracteres.');
       if (pw !== pw2) return setErr('Las contraseñas no coinciden.');
       if (!ack) return setErr('Debes confirmar que entiendes que es irrecuperable.');
+      if (pwStrength(pw).score <= 1 && !window.confirm('Es una contraseña débil, fácil de adivinar. ¿Usarla de todos modos?')) {
+        return;
+      }
       setBusy(true);
       try {
         await createAndOpen(pw);
@@ -30,6 +57,7 @@ export default function LockScreen() {
       }
       return;
     }
+    if (!pw) return setErr('Escribe tu contraseña.');
     setBusy(true);
     const ok = await unlock(pw);
     setBusy(false);
@@ -69,19 +97,12 @@ export default function LockScreen() {
   return (
     <div className="lock-screen">
       <div className="lock-card">
-        <div className="lock-logo" aria-hidden="true">
-          <svg viewBox="0 0 48 48" width="56" height="56">
-            <rect x="6" y="6" width="36" height="36" rx="9" fill="none" stroke="#3987e5" strokeWidth="3" />
-            <circle cx="24" cy="24" r="8.5" fill="none" stroke="#3987e5" strokeWidth="3" />
-            <line x1="24" y1="24" x2="24" y2="18" stroke="#3987e5" strokeWidth="3" strokeLinecap="round" />
-            <line x1="24" y1="24" x2="29" y2="27" stroke="#3987e5" strokeWidth="3" strokeLinecap="round" />
-          </svg>
+        <div className="lock-logo">
+          <BrandMark size={58} />
         </div>
         <h1>Bóveda</h1>
         <p className="lock-sub">
-          {setup
-            ? 'Crea tu bóveda. Todo se guarda cifrado en este dispositivo.'
-            : 'Introduce tu contraseña para descifrar tus datos.'}
+          {setup ? 'Crea tu bóveda. Todo se guarda cifrado en este dispositivo.' : 'Introduce tu contraseña para descifrar tus datos.'}
         </p>
         <form onSubmit={submit}>
           <input
@@ -91,59 +112,71 @@ export default function LockScreen() {
             autoFocus
             onChange={(e) => setPw(e.target.value)}
             aria-label="Contraseña maestra"
+            autoComplete={setup ? 'new-password' : 'current-password'}
           />
           {setup && (
             <>
+              <PasswordMeter password={pw} />
               <input
                 type="password"
                 placeholder="Repite la contraseña"
                 value={pw2}
                 onChange={(e) => setPw2(e.target.value)}
                 aria-label="Repite la contraseña"
+                autoComplete="new-password"
               />
               <label className="ack">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
                 <span>
-                  Entiendo que <strong>sin esta contraseña los datos son irrecuperables</strong>: no hay
-                  recuperación posible por diseño.
+                  Entiendo que <strong>sin esta contraseña los datos son irrecuperables</strong>: no hay recuperación
+                  posible por diseño.
                 </span>
               </label>
             </>
           )}
           {err && <div className={err.startsWith('✓') ? 'form-ok' : 'form-err'}>{err}</div>}
           <button className="btn btn-primary" disabled={busy} type="submit">
-            {busy ? 'Descifrando…' : setup ? 'Crear bóveda' : 'Desbloquear'}
+            {busy ? (setup ? 'Creando…' : 'Descifrando…') : setup ? 'Crear bóveda' : 'Desbloquear'}
           </button>
         </form>
         {!setup && bioState.ready && (
           <button className="btn btn-bio" disabled={busy} onClick={withBio}>
-            Entrar con huella
+            <Icon name="fingerprint" size={20} /> Entrar con huella
           </button>
         )}
         {!setup && bioState.ready && bioFails >= 2 && (
           <p className="bio-note">
-            ¿No responde? Entra con tu contraseña. Si la huella sigue sin funcionar, puede que la
-            passkey se borrara del sistema: desactívala y actívala de nuevo en Ajustes.
+            ¿No responde? Entra con tu contraseña. Si la huella sigue sin funcionar, puede que la passkey se borrara del
+            sistema: desactívala y actívala de nuevo en Ajustes.
           </p>
         )}
         {!setup && bioState.expired && (
           <p className="bio-note">
-            Han pasado 14 días: hoy toca escribir la contraseña, de recordatorio para que no se te
-            olvide. Después la huella vuelve a estar disponible.
+            Han pasado 14 días: hoy toca escribir la contraseña, de recordatorio para que no se te olvide. Después la huella
+            vuelve a estar disponible.
           </p>
         )}
         <div className="lock-actions">
-          <button className="btn-link" onClick={() => fileRef.current?.click()}>
-            Importar backup cifrado
+          <button className="btn-text" onClick={() => fileRef.current?.click()}>
+            Importar backup
           </button>
           {stage !== 'setup' && (
-            <button className="btn-link" onClick={() => setCreating((c) => !c)}>
+            <button
+              className="btn-text"
+              onClick={() => {
+                setCreating((c) => !c);
+                setErr('');
+              }}
+            >
               {creating ? 'Volver a desbloquear' : 'Crear otra bóveda'}
             </button>
           )}
         </div>
-        <input ref={fileRef} type="file" accept="application/json" hidden onChange={onImport} />
+        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onImport} />
       </div>
+      <p className="lock-foot">
+        <Icon name="lock" size={12} /> Cifrado AES-256 en tu dispositivo · sin cuentas ni servidores
+      </p>
     </div>
   );
 }
