@@ -37,9 +37,19 @@ const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 // interpolación lineal entre valoraciones, última valoración hacia delante. Los
 // gastos (reformas) posteriores a la última valoración se suman a ella hasta que
 // haya una valoración nueva: si no, una reforma aparecería como una pérdida.
-function manualValue(vals, date, costSoFar, costs = []) {
+function manualValue(vals, date, costSoFar, costs = [], startDate = null) {
   if (!vals.length) return costSoFar;
-  if (date < vals[0].date) return costSoFar;
+  if (date < vals[0].date) {
+    // Entre la compra y la primera valoración, la revalorización se reparte de
+    // forma lineal: el piso no vale "a coste" hasta el día de la tasación y de
+    // golpe otra cosa (eso pintaba un escalón falso en la gráfica).
+    if (startDate && startDate < vals[0].date && date >= startDate) {
+      const span = (Date.parse(vals[0].date) - Date.parse(startDate)) / 86400000;
+      const pos = (Date.parse(date) - Date.parse(startDate)) / 86400000;
+      return costSoFar + ((vals[0].value - costSoFar) * pos) / span;
+    }
+    return costSoFar;
+  }
   for (let i = 0; i < vals.length; i++) {
     if (date === vals[i].date) return vals[i].value;
     if (date < vals[i].date) {
@@ -286,7 +296,7 @@ export function buildDailySeries(data, end = todayStr()) {
         const f = x.cur === 'EUR' ? 1 : x.lastCashFx ?? fxNow(data.fxCache, x.cur);
         v = f != null ? L.qty * f : 0;
       } else if (L.qty > 0) {
-        if (x.a.type === 'realestate') v = manualValue(x.vals, date, L.costEur, x.costs);
+        if (x.a.type === 'realestate') v = manualValue(x.vals, date, L.costEur, x.costs, x.txs[0]?.date);
         else {
           const f = x.valFx ? x.lastFx : 1 / x.valDiv;
           // Sin precio todavía para ese día (compra anterior al histórico): se

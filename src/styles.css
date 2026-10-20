@@ -709,3 +709,9 @@ details > summary.card-title::-webkit-details-marker { display: none; }
   .sale-grid { grid-template-columns: 1fr; gap: 4px; }
   .sale-grid > div { flex-direction: row; justify-content: space-between; align-items: baseline; }
 }
+.total-label { white-space: nowrap; }
+.total-updated { white-space: nowrap; }
+.topbar { background: rgba(10, 14, 21, 0.94); }
+@media (max-width: 480px) {
+  .tx-amount { flex: 0 0 auto; margin-left: auto; text-align: right; }
+}

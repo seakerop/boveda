@@ -164,9 +164,14 @@ export default function Dashboard({ onOpenAsset, onOpenDebt, onOpenTax, onOpenSe
       <section className="card total-card">
         <div className="total-top">
           <div className="total-label">Patrimonio neto</div>
-          <button className="total-updated" onClick={doRefresh} disabled={refreshing} title="Actualizar precios">
+          <button
+            className="total-updated"
+            onClick={doRefresh}
+            disabled={refreshing}
+            title={ago ? `Precios actualizados ${ago}. Pulsa para actualizar` : "Actualizar precios"}
+          >
             <Icon name="refresh" size={13} className={refreshing ? 'spin' : ''} />
-            {refreshing ? 'Actualizando…' : ago ? `Actualizado ${ago}` : 'Sin actualizar'}
+            {refreshing ? 'Actualizando…' : ago || 'Sin actualizar'}
           </button>
         </div>
         <div className="total-value">
