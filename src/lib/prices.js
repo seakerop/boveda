@@ -152,13 +152,6 @@ function mergeToday(cache, price, currency) {
   cache.daily = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 
-// Índices para comparar la cartera (cotizan en EUR, en Ámsterdam y Xetra).
-export const BENCHMARKS = [
-  { symbol: 'IWDA.AS', label: 'MSCI World' },
-  { symbol: 'SXR8.DE', label: 'S&P 500' },
-  { symbol: 'BTC-EUR', label: 'Bitcoin' },
-];
-
 // Divisas (código ISO) que necesita la cartera: las de las operaciones y las de
 // los precios. Subunidades como GBp se resuelven a su código base (GBP).
 function neededCurrencies(data, priceCache) {
@@ -172,7 +165,6 @@ function neededCurrencies(data, priceCache) {
     add(a.currency);
     add(priceCache[a.id]?.currency);
   }
-  for (const b of Object.values(data.benchCache || {})) add(b?.currency);
   return curs;
 }
 
@@ -260,17 +252,3 @@ export async function refreshMarket(data) {
   return { quotes, priceCache, fxCache, euriborCache, errors };
 }
 
-// Índice de comparación, cacheado 12 h como cualquier histórico.
-export async function ensureBenchmark(symbol, benchCache, fxCache) {
-  const nextBench = { ...(benchCache || {}) };
-  const nextFx = { ...(fxCache || {}) };
-  const c = nextBench[symbol];
-  if (!c || Date.now() - c.fetchedAt > STALE_MS || !c.daily?.length) {
-    nextBench[symbol] = await fetchYahooDaily(symbol);
-  }
-  const { code } = fxBase(nextBench[symbol].currency);
-  if (code !== 'EUR' && (!nextFx[code] || Date.now() - nextFx[code].fetchedAt > STALE_MS)) {
-    nextFx[code] = await fetchFx(code);
-  }
-  return { benchCache: nextBench, fxCache: nextFx };
-}

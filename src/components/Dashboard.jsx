@@ -15,7 +15,6 @@ import CandleChart, { LINE, RangePicker, rangeCutoff } from './CandleChart.jsx';
 import Donut from './Donut.jsx';
 import Sparkline from './Sparkline.jsx';
 import Notices, { useNotices } from './Notices.jsx';
-import BenchmarkCard from './BenchmarkCard.jsx';
 import Icon, { AssetAvatar } from './Icon.jsx';
 
 const SEG_COLOR = Object.fromEntries(SEGMENTS.map((s) => [s.key, s.color]));
@@ -297,8 +296,6 @@ export default function Dashboard({ onOpenAsset, onOpenDebt, onOpenTax, onOpenSe
           onPick={(k) => setTab(k)}
         />
       </section>
-
-      <BenchmarkCard />
 
       <section className="positions">
         {grouped.map(({ seg, items }) => (

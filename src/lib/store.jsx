@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as db from './db.js';
 import * as vc from './vaultCrypto.js';
 import * as bio from './bioUnlock.js';
-import { ensureBenchmark, refreshMarket } from './prices.js';
+import { refreshMarket } from './prices.js';
 import { buildDailySeries, computePositions } from './portfolio.js';
 import { applyBackfill, backfillPatch, DEFAULT_SETTINGS, normalizeVault, VAULT_VERSION } from './migrate.js';
 import { todayStr } from './dates.js';
@@ -17,7 +17,7 @@ const EMPTY_VAULT = () => ({
   debtEvents: [],
 });
 
-const EMPTY_MARKET = () => ({ priceCache: {}, fxCache: {}, euriborCache: null, benchCache: {} });
+const EMPTY_MARKET = () => ({ priceCache: {}, fxCache: {}, euriborCache: null });
 
 const Ctx = createContext(null);
 export const useBoveda = () => useContext(Ctx);
@@ -261,6 +261,7 @@ export function BovedaProvider({ children }) {
         const rec = await db.getMarket(record.id);
         if (rec) {
           m = { ...m, ...(await vc.decryptJson(key, rec.iv, rec.data)) };
+          delete m.benchCache; // de cuando había comparación con índices
           marketOk = true;
         }
       } catch {
@@ -570,17 +571,6 @@ export function BovedaProvider({ children }) {
   }, [updateMarket]);
   doRefreshRef.current = doRefresh;
 
-  const loadBenchmark = useCallback(
-    async (symbol) => {
-      const id = idRef.current;
-      const m = marketRef.current;
-      const res = await ensureBenchmark(symbol, m.benchCache, m.fxCache);
-      if (idRef.current !== id) return; // otra bóveda abierta mientras tanto
-      updateMarket((cur) => ({ ...cur, benchCache: res.benchCache, fxCache: { ...cur.fxCache, ...res.fxCache } }));
-    },
-    [updateMarket]
-  );
-
   const forgetPrices = useCallback(
     (assetId) => {
       updateMarket((m) => {
@@ -695,7 +685,6 @@ export function BovedaProvider({ children }) {
     lock,
     mutate,
     doRefresh,
-    loadBenchmark,
     forgetPrices,
     changePassword,
     exportBackup,

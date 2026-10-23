@@ -38,9 +38,7 @@ Todo sale de las operaciones: compras, ventas, dividendos, alquileres y gastos d
 pisos. Cada operación en divisa guarda el tipo de cambio de su día, así que el coste en
 euros es el que pagaste y no el de convertirlo hoy. Al vender eliges a qué cuenta va el
 dinero, para que no desaparezca del patrimonio, y la app separa lo ganado en ventas de
-lo que aún no has vendido. Con eso calcula la rentabilidad anual (TIR) y te compara con
-lo que habrías tenido metiendo el mismo dinero los mismos días en el MSCI World, el
-S&P 500 o Bitcoin.
+lo que aún no has vendido. Con eso calcula la rentabilidad anual (TIR).
 
 Para la renta hay un informe por año con las ganancias y pérdidas calculadas por FIFO,
 que es como lo hace Hacienda (y no coincide con el precio medio), avisando de la regla

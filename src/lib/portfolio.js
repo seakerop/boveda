@@ -17,7 +17,6 @@ import {
   txCurrency,
   txFlowEur,
   txFx,
-  valueAtOrBefore,
 } from './ledger.js';
 
 export { todayStr };
@@ -394,38 +393,3 @@ export function txMarkers(data, assetId) {
   );
 }
 
-// Benchmark: "¿y si cada euro que metiste (y sacaste) lo hubieras movido el mismo
-// día en un índice?". Mismos flujos, mismas fechas: es la comparación honesta
-// (método PME). Solo inversiones financieras (cripto y bolsa).
-export function benchmarkCompare(positions, benchDaily, benchCur, fxCache, today = todayStr()) {
-  if (!benchDaily?.length) return null;
-  // Posiciones vivas sin precio quedan fuera: contar lo que costaron pero no lo
-  // que valen sesgaría la comparación en contra.
-  const inv = positions.filter(
-    (p) =>
-      (p.asset.type === 'crypto' || p.asset.type === 'stock') &&
-      !(p.qty > 0 && p.valueEur == null) &&
-      p.flows.every((f) => Number.isFinite(f.amount))
-  );
-  // El último flujo de una posición viva es su valor actual, no un movimiento de dinero.
-  const realFlows = inv.flatMap((p) => (p.qty > 0 && p.valueEur != null ? p.flows.slice(0, -1) : p.flows));
-  if (!realFlows.length) return null;
-  const idxEur = (date) => {
-    const px = valueAtOrBefore(benchDaily, date) ?? benchDaily[0][1];
-    const f = fxAt(fxCache, benchCur, date);
-    return px != null && f != null ? px * f : null;
-  };
-  const nowIdx = idxEur(today);
-  if (nowIdx == null) return null;
-  let units = 0;
-  let early = false;
-  for (const f of realFlows) {
-    const px = idxEur(f.date);
-    if (px == null) continue;
-    if (f.date < benchDaily[0][0]) early = true;
-    units += -f.amount / px; // aportar compra participaciones; sacar las vende
-  }
-  const actual = inv.reduce((s, p) => s + (p.valueEur ?? 0), 0);
-  const since = realFlows.reduce((m, f) => (f.date < m ? f.date : m), realFlows[0].date);
-  return { benchValue: units * nowIdx, actual, early, since };
-}

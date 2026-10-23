@@ -55,7 +55,10 @@ body {
   background-attachment: fixed;
 }
 
-#root { min-height: 100dvh; }
+/* clip: el zoom de "entrar por la puerta" no debe ensanchar la página; si lo
+   hace, el navegador del móvil se aleja para que quepa y se queda así. */
+#root { min-height: 100dvh; overflow: clip; }
+@supports not (overflow: clip) { #root { overflow-x: hidden; } }
 
 .icon { flex: 0 0 auto; display: block; }
 
@@ -294,11 +297,6 @@ input:focus-visible, select:focus-visible { outline: none; }
   .donut { width: 150px; align-self: center; }
 }
 
-/* ---------- benchmark ---------- */
-.bench { margin-top: 14px; }
-.bench-pad { margin-top: 14px; }
-.bench-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.bench-verdict { font-weight: 600; font-size: 14px; margin: 12px 0 6px; }
 
 /* ---------- posiciones ---------- */
 .positions { margin-top: 6px; }
