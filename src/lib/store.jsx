@@ -222,8 +222,20 @@ export function BovedaProvider({ children }) {
     return { id, key, saltB64, d };
   }
 
-  const createAndOpen = useCallback(async (password) => {
+  // beforeOpen (opcional): se espera justo antes de mostrar los datos. La pantalla
+  // de bloqueo lo usa para la animación de la caja fuerte abriéndose.
+  const runBeforeOpen = async (beforeOpen) => {
+    if (!beforeOpen) return;
+    try {
+      await beforeOpen();
+    } catch {
+      // una animación que falle nunca debe impedir abrir la bóveda
+    }
+  };
+
+  const createAndOpen = useCallback(async (password, beforeOpen) => {
     const { id, key, saltB64, d } = await createVaultRecord(password);
+    await runBeforeOpen(beforeOpen);
     keyRef.current = key;
     bioRef.current = null;
     iterRef.current = vc.PBKDF2_ITER;
@@ -275,7 +287,7 @@ export function BovedaProvider({ children }) {
   );
 
   const unlock = useCallback(
-    async (password) => {
+    async (password, beforeOpen) => {
       const vaults = await db.allVaults();
       for (const v of vaults) {
         let key;
@@ -292,6 +304,7 @@ export function BovedaProvider({ children }) {
           const rec = { ...v };
           enqueue(() => db.putVault(rec)).catch(() => {});
         }
+        await runBeforeOpen(beforeOpen);
         await openRecord(v, key, d);
         return true;
       }
@@ -302,7 +315,7 @@ export function BovedaProvider({ children }) {
 
   // Desbloqueo con huella: una verificación contra las bóvedas con huella
   // vigente; la que responda se abre. Sin registros vigentes no hay botón.
-  const unlockWithBio = useCallback(async () => {
+  const unlockWithBio = useCallback(async (beforeOpen) => {
     try {
       const vaults = await db.allVaults();
       const fresh = vaults.filter((v) => v.bio && bio.pwFresh(v.bio));
@@ -313,6 +326,7 @@ export function BovedaProvider({ children }) {
       const { record, keyBits } = await bio.bioUnlock(fresh);
       const key = await vc.keyFromBits(keyBits);
       const d = await vc.decryptJson(key, record.iv, record.data);
+      await runBeforeOpen(beforeOpen);
       await openRecord(record, key, d);
       return { ok: true };
     } catch (e) {

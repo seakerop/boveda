@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useBoveda } from './lib/store.jsx';
 import LockScreen, { BrandMark } from './components/LockScreen.jsx';
+import { vaultAnimEnabled } from './components/VaultDoor.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import AssetDetail from './components/AssetDetail.jsx';
 import AddAsset from './components/AddAsset.jsx';
@@ -51,6 +52,20 @@ export default function App() {
   const { stage, bootError, privacy, cyclePrivacy, lock, refreshing, doRefresh } = useBoveda();
   const [view, setView] = useState({ name: 'dashboard' });
   const [adding, setAdding] = useState(false);
+  // Cómo entra la pantalla de bloqueo: intro la primera vez que se abre la app y
+  // la puerta cerrándose cuando se bloquea estando dentro.
+  // Se calcula durante el pintado (no en un efecto) para que la pantalla nazca ya
+  // con su entrada correcta, sin un fotograma intermedio.
+  const booted = useRef(false);
+  const prevStage = useRef('loading');
+  const lockEntry = useRef('intro');
+  if (stage !== prevStage.current) {
+    if (stage === 'locked' || stage === 'setup') {
+      lockEntry.current = !booted.current ? 'intro' : prevStage.current === 'open' ? 'closing' : 'none';
+      booted.current = true;
+    }
+    prevStage.current = stage;
+  }
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -82,19 +97,17 @@ export default function App() {
     );
   }
   if (stage === 'loading') {
-    return (
-      <div className="splash">
-        <BrandMark size={44} />
-      </div>
-    );
+    // Vacía a propósito: dura unos milisegundos y la intro de la caja fuerte
+    // entra justo después (un logo aquí parpadearía antes de la animación).
+    return <div className="splash" />;
   }
   if (stage !== 'open') {
-    return <LockScreen />;
+    return <LockScreen key={stage} entry={lockEntry.current} />;
   }
 
   const home = () => setView({ name: 'dashboard' });
   return (
-    <div className="app">
+    <div className={`app ${vaultAnimEnabled() ? "" : "app-static"}`}>
       <header className="topbar">
         <button className="brand" onClick={home} aria-label="Ir al inicio">
           <BrandMark size={26} />

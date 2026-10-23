@@ -6,6 +6,7 @@ import { numToInput, parseNum } from '../lib/format.js';
 import Icon from './Icon.jsx';
 import NumberInput from './NumberInput.jsx';
 import PasswordMeter, { pwStrength } from './PasswordMeter.jsx';
+import { setVaultAnimPref, vaultAnimEnabled } from './VaultDoor.jsx';
 
 function PwForm({ label, onSubmit, danger, okMsg = '✓ Hecho' }) {
   const [pw, setPw] = useState('');
@@ -212,6 +213,14 @@ function TargetsCard() {
 export default function Settings({ onBack, onOpenTax }) {
   const { data, mutate, changePassword, createDecoy, exportBackup, wipeVault, lock, notify } = useBoveda();
   const [confirmWipe, setConfirmWipe] = useState('');
+  const reducedMotion = (() => {
+    try {
+      return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return false;
+    }
+  })();
+  const [vaultAnim, setVaultAnim] = useState(() => vaultAnimEnabled());
   const [lockDraft, setLockDraft] = useState(String(data.settings.autoLockMin));
 
   async function doWipe() {
@@ -310,6 +319,22 @@ export default function Settings({ onBack, onOpenTax }) {
                 return d;
               })
             }
+          />
+        </label>
+        <label className="setting-row">
+          <span>
+            Animación de la caja fuerte al abrir
+            {reducedMotion && <small className="setting-hint">Desactivada porque tu sistema pide reducir movimiento.</small>}
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={vaultAnim}
+            disabled={reducedMotion}
+            onChange={(e) => {
+              setVaultAnimPref(e.target.checked);
+              setVaultAnim(e.target.checked);
+            }}
           />
         </label>
         <button className="btn" onClick={lock}>

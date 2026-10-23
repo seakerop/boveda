@@ -1,7 +1,8 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import Icon from './Icon.jsx';
 import PasswordMeter, { pwStrength } from './PasswordMeter.jsx';
+import VaultDoor, { vaultAnimEnabled } from './VaultDoor.jsx';
 
 // Marca de la app: el dial de la caja fuerte.
 export function BrandMark({ size = 28 }) {
@@ -25,7 +26,12 @@ export function BrandMark({ size = 28 }) {
   );
 }
 
-export default function LockScreen() {
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// entry: cómo aparece la pantalla. 'intro' al abrir la app (la puerta aparece y
+// marca una combinación), 'closing' al volver a bloquear (la puerta se cierra),
+// 'none' en cualquier otro caso.
+export default function LockScreen({ entry = 'none' }) {
   const { stage, unlock, unlockWithBio, bioState, createAndOpen, importBackup } = useBoveda();
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -35,12 +41,53 @@ export default function LockScreen() {
   const [creating, setCreating] = useState(stage === 'setup');
   const [bioFails, setBioFails] = useState(0);
   const fileRef = useRef(null);
+  const doorRef = useRef(null);
+  const screenRef = useRef(null);
+  const cardRef = useRef(null);
+  const [anim] = useState(vaultAnimEnabled);
+  const [intro, setIntro] = useState(anim && entry === 'intro');
 
   const setup = stage === 'setup' || creating;
+
+  useEffect(() => {
+    if (!anim) return;
+    let alive = true;
+    if (entry === 'intro') {
+      doorRef.current?.intro().then(() => alive && setIntro(false));
+    } else if (entry === 'closing') {
+      doorRef.current?.close();
+    }
+    return () => {
+      alive = false;
+    };
+  }, [anim, entry]);
+
+  // Tocar la pantalla durante la intro la salta.
+  function skipIntro() {
+    if (!intro) return;
+    doorRef.current?.skip();
+    cardRef.current?.classList.add('skip');
+    setIntro(false);
+  }
+
+  // Se ejecuta con los datos ya descifrados y justo antes de mostrarlos: la
+  // puerta se abre y la pantalla "entra" por ella.
+  async function openDoor() {
+    if (!anim) return;
+    await doorRef.current?.open();
+    const c = doorRef.current?.center();
+    const el = screenRef.current;
+    if (el && c) {
+      el.style.transformOrigin = `${c.x}px ${c.y}px`;
+      el.classList.add('is-leaving');
+    }
+    await wait(380);
+  }
 
   async function submit(e) {
     e.preventDefault();
     setErr('');
+    skipIntro();
     if (setup) {
       if (pw.length < 8) return setErr('La contraseña debe tener al menos 8 caracteres.');
       if (pw !== pw2) return setErr('Las contraseñas no coinciden.');
@@ -49,9 +96,11 @@ export default function LockScreen() {
         return;
       }
       setBusy(true);
+      if (anim) doorRef.current?.spin();
       try {
-        await createAndOpen(pw);
+        await createAndOpen(pw, openDoor);
       } catch (e2) {
+        if (anim) await doorRef.current?.stop();
         setErr(String(e2.message || e2));
         setBusy(false);
       }
@@ -59,9 +108,13 @@ export default function LockScreen() {
     }
     if (!pw) return setErr('Escribe tu contraseña.');
     setBusy(true);
-    const ok = await unlock(pw);
-    setBusy(false);
+    // El dial gira mientras se deriva la clave: la animación ocupa la espera
+    // que ya existe (unas décimas de segundo), no añade una nueva.
+    if (anim) doorRef.current?.spin();
+    const ok = await unlock(pw, openDoor);
     if (!ok) {
+      if (anim) await doorRef.current?.deny();
+      setBusy(false);
       setErr('Contraseña incorrecta.');
       setPw('');
     }
@@ -69,10 +122,16 @@ export default function LockScreen() {
 
   async function withBio() {
     setErr('');
+    skipIntro();
     setBusy(true);
-    const r = await unlockWithBio();
-    setBusy(false);
+    if (anim) doorRef.current?.spin();
+    const r = await unlockWithBio(openDoor);
     if (!r.ok) {
+      if (anim) {
+        if (r.cancelled) await doorRef.current?.stop();
+        else await doorRef.current?.deny();
+      }
+      setBusy(false);
       // Un "cancelado" también cuenta: WebAuthn no distingue entre cancelar y
       // una credencial borrada del sistema, y eso falla en silencio en bucle.
       setBioFails((c) => c + 1);
@@ -95,11 +154,16 @@ export default function LockScreen() {
   }
 
   return (
-    <div className="lock-screen">
-      <div className="lock-card">
+    <div className="lock-screen" ref={screenRef} onPointerDown={skipIntro}>
+      <div className={`lock-card ${intro ? 'is-intro' : ''}`} ref={cardRef}>
         <div className="lock-logo">
-          <BrandMark size={58} />
+          {anim ? (
+            <VaultDoor ref={doorRef} size={104} initial={entry === 'closing' ? 'open' : 'closed'} />
+          ) : (
+            <BrandMark size={58} />
+          )}
         </div>
+        <div className="lock-body">
         <h1>Bóveda</h1>
         <p className="lock-sub">
           {setup ? 'Crea tu bóveda. Todo se guarda cifrado en este dispositivo.' : 'Introduce tu contraseña para descifrar tus datos.'}
@@ -136,7 +200,7 @@ export default function LockScreen() {
           )}
           {err && <div className={err.startsWith('✓') ? 'form-ok' : 'form-err'}>{err}</div>}
           <button className="btn btn-primary" disabled={busy} type="submit">
-            {busy ? (setup ? 'Creando…' : 'Descifrando…') : setup ? 'Crear bóveda' : 'Desbloquear'}
+            {busy ? (setup ? 'Creando…' : 'Abriendo…') : setup ? 'Crear bóveda' : 'Desbloquear'}
           </button>
         </form>
         {!setup && bioState.ready && (
@@ -173,6 +237,7 @@ export default function LockScreen() {
           )}
         </div>
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onImport} />
+        </div>
       </div>
       <p className="lock-foot">
         <Icon name="lock" size={12} /> Cifrado AES-256 en tu dispositivo · sin cuentas ni servidores
