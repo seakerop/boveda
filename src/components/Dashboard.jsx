@@ -16,6 +16,7 @@ import Donut from './Donut.jsx';
 import Sparkline from './Sparkline.jsx';
 import Notices, { useNotices } from './Notices.jsx';
 import Icon, { AssetAvatar } from './Icon.jsx';
+import { planSaveTx } from '../lib/ops.js';
 
 const SEG_COLOR = Object.fromEntries(SEGMENTS.map((s) => [s.key, s.color]));
 const LINE_KEY = { total: 'line', crypto: 'c_crypto', stock: 'c_stock', realestate: 'c_realestate' };
@@ -82,7 +83,7 @@ function PositionRow({ p, total, privacy, spark, onOpen }) {
 }
 
 export default function Dashboard({ onOpenAsset, onOpenDebt, onOpenTax, onOpenSettings, onAdd }) {
-  const { data, positions, series, privacy, refreshing, lastRefresh, marketErrors, doRefresh, exportBackup, notify } =
+  const { data, positions, series, privacy, refreshing, lastRefresh, marketErrors, doRefresh, exportBackup, notify, mutate } =
     useBoveda();
   const [tab, setTab] = useState('total');
   const [range, setRange] = useState('1y');
@@ -152,6 +153,24 @@ export default function Dashboard({ onOpenAsset, onOpenDebt, onOpenTax, onOpenSe
       }
     } else if (action.startsWith('debt:')) onOpenDebt(action.slice(5));
     else if (action.startsWith('asset:')) onOpenAsset(action.slice(6));
+    else if (action.startsWith('split:')) {
+      const [, assetId, date, from, to] = action.split(':');
+      const t = { id: crypto.randomUUID(), assetId, kind: 'split', date, splitFrom: Number(from), splitTo: Number(to) };
+      const plan = planSaveTx(data, t, null);
+      if (plan.error) return notify(plan.error, { kind: 'error', ms: 7000 });
+      mutate((d) => {
+        d.transactions = plan.transactions;
+        return d;
+      });
+      notify('Desdoblamiento apuntado', {
+        kind: 'ok',
+        undo: () =>
+          mutate((d) => {
+            d.transactions = d.transactions.filter((x) => x.id !== t.id);
+            return d;
+          }),
+      });
+    }
   }
 
   const stats = summary.stats;

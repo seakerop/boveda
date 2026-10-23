@@ -34,7 +34,7 @@ export async function yahooProxy(params) {
       const p2 = Math.max(p1, Math.min(Number(params.period2) || now, now + 86400));
       qs = `period1=${Math.floor(p1)}&period2=${Math.floor(p2)}`;
     }
-    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&${qs}`;
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&${qs}&events=split`;
   } else {
     throw new BadRequest('operación no soportada');
   }

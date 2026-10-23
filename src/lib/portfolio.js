@@ -14,6 +14,7 @@ import {
   newLedger,
   returnStats,
   sortTxs,
+  splitFactor,
   txCurrency,
   txFlowEur,
   txFx,
@@ -220,10 +221,15 @@ export function buildDailySeries(data, end = todayStr()) {
       const cur = txCurrency(a, data.priceCache);
       const priceCur = data.priceCache?.[a.id]?.currency || cur;
       const { code, div } = fxBase(priceCur);
+      const txs = sortTxs(txsAll.filter((t) => t.assetId === a.id));
       return {
         a,
         cur,
-        txs: sortTxs(txsAll.filter((t) => t.assetId === a.id)),
+        txs,
+        // Yahoo da los precios antiguos ya divididos por los desdoblamientos que
+        // vinieron después: antes de cada uno, las acciones se cuentan en "acciones
+        // de hoy" para que cantidad × precio sea el valor de verdad.
+        adj: a.type === 'stock' ? txs.filter((t) => t.kind === 'split').reduce((p, t) => p * splitFactor(t), 1) : 1,
         prices: data.priceCache?.[a.id]?.daily || [],
         valFx: code === 'EUR' ? null : data.fxCache?.[code]?.daily || [],
         valDiv: div,
@@ -269,6 +275,7 @@ export function buildDailySeries(data, end = todayStr()) {
         const t = x.txs[x.i];
         const fx = txFx(t, x.cur, data.fxCache) ?? fxNow(data.fxCache, x.cur);
         if (fx != null) applyTx(x.L, t, fx);
+        if (t.kind === 'split' && x.a.type === 'stock') x.adj /= splitFactor(t);
         x.i++;
       }
       while (x.pi < x.prices.length && x.prices[x.pi][0] <= date) {
@@ -300,7 +307,7 @@ export function buildDailySeries(data, end = todayStr()) {
           const f = x.valFx ? x.lastFx : 1 / x.valDiv;
           // Sin precio todavía para ese día (compra anterior al histórico): se
           // valora a coste, que no inventa ni ganancias ni pérdidas.
-          v = x.lastPrice != null && f != null ? L.qty * x.lastPrice * f : L.costEur;
+          v = x.lastPrice != null && f != null ? L.qty * x.adj * x.lastPrice * f : L.costEur;
         }
       }
       row[x.a.type] += v;
@@ -382,14 +389,18 @@ export function assetDailyEurPairs(data, assetId) {
 }
 
 export function txMarkers(data, assetId) {
-  return sortTxs(data.transactions.filter((t) => t.assetId === assetId && (t.kind === 'buy' || t.kind === 'sell'))).map(
-    (t) => ({
+  const mark = (t) => {
+    if (t.kind === 'split') {
+      return { time: mondayOf(t.date), position: 'aboveBar', color: '#8791a8', shape: 'circle', text: 'D' };
+    }
+    return {
       time: mondayOf(t.date),
       position: t.kind === 'buy' ? 'belowBar' : 'aboveBar',
       color: t.kind === 'buy' ? '#34c77b' : '#f06b6b',
       shape: t.kind === 'buy' ? 'arrowUp' : 'arrowDown',
       text: t.kind === 'buy' ? 'C' : 'V',
-    })
-  );
+    };
+  };
+  return sortTxs(data.transactions.filter((t) => t.assetId === assetId && ['buy', 'sell', 'split'].includes(t.kind))).map(mark);
 }
 

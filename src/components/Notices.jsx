@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { addDays, daysBetween, fmtAgo, fmtDate, todayStr } from '../lib/dates.js';
-import { fmtRate, money, moneySigned } from '../lib/format.js';
+import { fmtQty, fmtRate, money, moneySigned } from '../lib/format.js';
 import { paymentBeforeReview } from '../lib/loan.js';
+import { pendingSplits } from '../lib/ledger.js';
 import Icon from './Icon.jsx';
 
 const BACKUP_EVERY_DAYS = 30;
@@ -55,6 +56,27 @@ export function useNotices(positions, debtStates) {
         action: `debt:${debt.id}`,
         actionLabel: 'Ver simulador',
         snoozeUntil: r.date,
+      });
+    }
+
+    for (const s of pendingSplits(data)) {
+      const key = `split:${s.asset.id}:${s.date}`;
+      if (!live(key)) continue;
+      const name = s.asset.symbol || s.asset.name;
+      const ratio = `${fmtQty(s.to)} por ${fmtQty(s.from)}`;
+      out.push({
+        key,
+        kind: 'info',
+        icon: 'info',
+        title: `${name}: desdoblamiento de ${ratio} el ${fmtDate(s.date)}`,
+        text:
+          (s.to > s.from
+            ? `La empresa dividió cada ${s.from === 1 ? 'acción' : `${fmtQty(s.from)} acciones`} en ${fmtQty(s.to)}: tienes más acciones y cada una vale menos, con el mismo dinero en total.`
+            : `La empresa juntó cada ${fmtQty(s.from)} acciones en ${s.to === 1 ? 'una' : fmtQty(s.to)}: tienes menos acciones y cada una vale más, con el mismo dinero en total.`) +
+          ' Apúntalo para que tu cantidad y tu precio medio cuadren. No paga impuestos.',
+        action: `split:${s.asset.id}:${s.date}:${s.from}:${s.to}`,
+        actionLabel: 'Apuntarlo',
+        snoozeDays: 30,
       });
     }
 

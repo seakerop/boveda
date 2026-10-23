@@ -8,6 +8,7 @@ import AddAsset from './components/AddAsset.jsx';
 import Settings from './components/Settings.jsx';
 import DebtDetail from './components/DebtDetail.jsx';
 import TaxReport from './components/TaxReport.jsx';
+import Tour from './components/Tour.jsx';
 import Icon from './components/Icon.jsx';
 
 const PRIVACY_ICON = { normal: 'eye', hidden: 'eyeOff', percent: 'percent' };
@@ -49,9 +50,10 @@ function Toasts() {
 }
 
 export default function App() {
-  const { stage, bootError, privacy, cyclePrivacy, lock, refreshing, doRefresh } = useBoveda();
+  const { stage, bootError, privacy, cyclePrivacy, lock, refreshing, doRefresh, data, mutate } = useBoveda();
   const [view, setView] = useState({ name: 'dashboard' });
   const [adding, setAdding] = useState(false);
+  const [tourAgain, setTourAgain] = useState(false);
   // Cómo entra la pantalla de bloqueo: intro la primera vez que se abre la app y
   // la puerta cerrándose cuando se bloquea estando dentro.
   // Se calcula durante el pintado (no en un efecto) para que la pantalla nazca ya
@@ -76,6 +78,7 @@ export default function App() {
     if (stage !== 'open') {
       setView({ name: 'dashboard' });
       setAdding(false);
+      setTourAgain(false);
     }
   }, [stage]);
 
@@ -106,6 +109,18 @@ export default function App() {
   }
 
   const home = () => setView({ name: 'dashboard' });
+  // Tutorial: la primera vez que se entra en cada bóveda, o cuando se pide desde Ajustes.
+  const showTour = tourAgain || (data && !data.settings.tourDone);
+  const endTour = () => {
+    setTourAgain(false);
+    if (!data.settings.tourDone) {
+      mutate((d) => {
+        d.settings.tourDone = true;
+        return d;
+      });
+    }
+  };
+  const empty = data && !data.assets.length && !(data.debts || []).length;
   return (
     <div className={`app ${vaultAnimEnabled() ? "" : "app-static"}`}>
       <header className="topbar">
@@ -145,10 +160,26 @@ export default function App() {
         )}
         {view.name === 'asset' && <AssetDetail key={view.id} assetId={view.id} onBack={home} />}
         {view.name === 'debt' && <DebtDetail key={view.id} debtId={view.id} onBack={home} />}
-        {view.name === 'settings' && <Settings onBack={home} onOpenTax={() => setView({ name: 'tax' })} />}
+        {view.name === 'settings' && (
+          <Settings onBack={home} onOpenTax={() => setView({ name: 'tax' })} onOpenTour={() => setTourAgain(true)} />
+        )}
         {view.name === 'tax' && <TaxReport onBack={home} />}
       </main>
       {adding && <AddAsset onClose={() => setAdding(false)} />}
+      {showTour && !adding && (
+        <Tour
+          onDone={endTour}
+          onAddFirst={
+            empty
+              ? () => {
+                  endTour();
+                  home();
+                  setAdding(true);
+                }
+              : null
+          }
+        />
+      )}
       <Toasts />
     </div>
   );

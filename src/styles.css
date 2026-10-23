@@ -416,6 +416,18 @@ input:focus-visible, select:focus-visible { outline: none; }
 }
 .op-total strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 .inline-note { display: flex; gap: 7px; align-items: center; font-size: 12.5px; color: var(--warn); margin-bottom: 8px; }
+/* Explicaciones dentro de los formularios (qué es un desdoblamiento, etc.). */
+.explain {
+  font-size: 13px; line-height: 1.55; color: var(--ink-2);
+  background: rgba(76, 141, 234, 0.07); border: 1px solid rgba(76, 141, 234, 0.22);
+  border-radius: 12px; padding: 12px 14px;
+}
+.explain strong { color: var(--ink); }
+.explain-foot { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.split-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; color: var(--ink-2); }
+.split-row .num-input { width: 72px; }
+.split-row input { text-align: center; }
+.seg-full.seg-grid { display: grid; grid-template-columns: 1fr 1fr; }
 
 /* medidor de contraseña */
 .pw-meter { display: flex; flex-direction: column; gap: 6px; text-align: left; }
@@ -812,7 +824,10 @@ details > summary.card-title::-webkit-details-marker { display: none; }
 /* Al abrirse, la pantalla "entra" por la puerta y aparece el panel. */
 .lock-screen { transition: transform 0.42s cubic-bezier(0.5, 0, 0.7, 0.2), opacity 0.42s ease-in; }
 .lock-screen.is-leaving { transform: scale(2.4); opacity: 0; pointer-events: none; }
-.app { animation: appIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* backwards y no both: una animación de transform o filter que se queda "rellenando"
+   al acabar convierte .app en el contenedor de todo lo position: fixed (el botón +,
+   los modales, los avisos) y dejan de ir pegados a la pantalla. */
+.app { animation: appIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
 @keyframes appIn {
   from { opacity: 0; transform: scale(0.97); filter: blur(4px); }
   to { opacity: 1; transform: none; filter: none; }
@@ -822,3 +837,41 @@ details > summary.card-title::-webkit-details-marker { display: none; }
 .setting-hint { font-size: 12px; color: var(--muted); }
 .app.app-static { animation: none; }
 .lock-logo { border-radius: 50%; padding: 14px; background: radial-gradient(circle, rgba(76, 141, 234, 0.16), transparent 68%); }
+
+/* ---------- tutorial ---------- */
+/* Aparece cuando la puerta ya ha terminado de abrirse y el panel ha entrado. */
+.tour-back { animation: fade 0.3s ease-out 0.45s both; }
+.tour-back .tour { animation: rise 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) 0.45s both; }
+.tour { display: flex; flex-direction: column; gap: 14px; padding-top: 14px; }
+.tour-top { display: flex; align-items: center; justify-content: space-between; min-height: 28px; }
+.tour-count { font-size: 12px; font-weight: 650; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.tour-step { text-align: center; min-height: 372px; animation: tourIn 0.28s ease-out; }
+.tour-step h2 { margin: 12px 0 8px; font-size: 21px; font-weight: 750; letter-spacing: -0.02em; }
+.tour-art { display: flex; justify-content: center; align-items: center; height: 104px; }
+.tour-icon {
+  width: 76px; height: 76px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  background: radial-gradient(circle at 50% 35%, rgba(76, 141, 234, 0.28), rgba(76, 141, 234, 0.08) 70%);
+  box-shadow: 0 0 0 1px rgba(76, 141, 234, 0.25) inset, 0 10px 30px rgba(59, 111, 224, 0.18);
+}
+.tour-text { margin: 0 auto; max-width: 400px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.tour-text strong { color: var(--ink); }
+.tour-tip {
+  margin: 14px auto 0; max-width: 400px; text-align: left;
+  font-size: 13px; line-height: 1.5; color: var(--ink-2);
+  background: rgba(76, 141, 234, 0.07); border: 1px solid rgba(76, 141, 234, 0.2);
+  border-radius: 12px; padding: 10px 13px;
+}
+.tour-where {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 14px;
+  font-size: 12px; color: var(--muted); padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border);
+}
+.tour-dots { display: flex; justify-content: center; gap: 6px; }
+.tour-dots button { width: 7px; height: 7px; padding: 0; border-radius: 99px; background: var(--border-strong); transition: width 0.2s, background 0.2s; }
+.tour-dots button.on { width: 20px; background: var(--accent); }
+.tour-nav { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+@keyframes tourIn { from { opacity: 0; transform: translateX(14px); } }
+@media (prefers-reduced-motion: reduce) {
+  .tour-back, .tour-back .tour, .tour-step { animation: none; }
+}

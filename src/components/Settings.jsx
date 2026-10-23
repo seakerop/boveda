@@ -210,7 +210,7 @@ function TargetsCard() {
   );
 }
 
-export default function Settings({ onBack, onOpenTax }) {
+export default function Settings({ onBack, onOpenTax, onOpenTour }) {
   const { data, mutate, changePassword, createDecoy, exportBackup, wipeVault, lock, notify } = useBoveda();
   const [confirmWipe, setConfirmWipe] = useState('');
   const reducedMotion = (() => {
@@ -352,6 +352,17 @@ export default function Settings({ onBack, onOpenTax }) {
           <span>
             <strong>Informe para la renta</strong>
             <small>Ganancias por FIFO, dividendos y alquileres de cada año</small>
+          </span>
+          <Icon name="chevron" size={16} className="link-chev" />
+        </button>
+      </section>
+
+      <section className="card">
+        <button className="link-tile flat" onClick={onOpenTour}>
+          <Icon name="info" size={18} />
+          <span>
+            <strong>Cómo funciona la app</strong>
+            <small>Vuelve a ver el tutorial del principio</small>
           </span>
           <Icon name="chevron" size={16} className="link-chev" />
         </button>

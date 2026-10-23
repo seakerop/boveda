@@ -38,7 +38,12 @@ Todo sale de las operaciones: compras, ventas, dividendos, alquileres y gastos d
 pisos. Cada operación en divisa guarda el tipo de cambio de su día, así que el coste en
 euros es el que pagaste y no el de convertirlo hoy. Al vender eliges a qué cuenta va el
 dinero, para que no desaparezca del patrimonio, y la app separa lo ganado en ventas de
-lo que aún no has vendido. Con eso calcula la rentabilidad anual (TIR).
+lo que aún no has vendido. Con eso calcula la rentabilidad anual (TIR). Los desdoblamientos
+de acciones se apuntan como una operación más; si Yahoo informa de uno en algo que
+tienes, la app avisa para apuntarlo con un toque.
+
+La primera vez que entras en una bóveda sale un tutorial corto (se puede saltar y volver
+a ver desde Ajustes).
 
 Para la renta hay un informe por año con las ganancias y pérdidas calculadas por FIFO,
 que es como lo hace Hacienda (y no coincide con el precio medio), avisando de la regla

@@ -62,7 +62,13 @@ export async function fetchYahooDaily(symbol) {
   }
   const daily = [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   if (!daily.length) throw new Error(`histórico vacío para ${symbol}`);
-  return { fetchedAt: Date.now(), currency: res.meta?.currency || 'USD', daily };
+  // Desdoblamientos que conoce Yahoo (sus precios antiguos ya vienen corregidos por
+  // ellos): la app los usa para avisar de los que no estén apuntados.
+  const splits = Object.values(res.events?.splits || {})
+    .filter((s) => s.numerator > 0 && s.denominator > 0 && s.numerator !== s.denominator)
+    .map((s) => ({ date: msToDate(s.date * 1000), from: s.denominator, to: s.numerator }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  return { fetchedAt: Date.now(), currency: res.meta?.currency || 'USD', daily, ...(splits.length ? { splits } : {}) };
 }
 
 // El histórico completo de crypto sale de Yahoo (pares BTC-EUR / BTC-USD, sin

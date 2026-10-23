@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useBoveda } from '../lib/store.jsx';
 import { assetDailyEurPairs, SEGMENTS, txMarkers, weeklyFromPairs } from '../lib/portfolio.js';
 import { euriborMap, loanState } from '../lib/loan.js';
-import { fxAt, fxBase, incomeGross, qtyAvailableOn, sortTxs, txCurrency } from '../lib/ledger.js';
+import { fxAt, fxBase, incomeGross, qtyAvailableOn, sortTxs, splitFactor, txCurrency } from '../lib/ledger.js';
 import { planDeleteAsset, planDeleteTx, planSaveTx, sequenceBroken } from '../lib/ops.js';
 import {
   fmtEur,
@@ -23,7 +23,7 @@ import NumberInput from './NumberInput.jsx';
 
 const KIND_LABEL = {
   crypto: { buy: 'Compra', sell: 'Venta' },
-  stock: { buy: 'Compra', sell: 'Venta', income: 'Dividendo' },
+  stock: { buy: 'Compra', sell: 'Venta', income: 'Dividendo', split: 'Desdoblamiento' },
   realestate: { buy: 'Compra', cost: 'Gasto / reforma', income: 'Alquiler', sell: 'Venta' },
   cash: { buy: 'Ingreso', sell: 'Retirada' },
 };
@@ -51,10 +51,10 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
 
   const [kind, setKind] = useState(tx?.kind || kinds[0].key);
   const [date, setDate] = useState(tx?.date || todayStr());
-  const [qty, setQty] = useState(tx && isMarket ? numToInput(tx.qty) : '');
+  const [qty, setQty] = useState(tx && isMarket && tx.kind !== 'split' ? numToInput(tx.qty) : '');
   // Operación nueva en cripto/bolsa: precio de hoy pre-rellenado (editable).
   const [price, setPrice] = useState(() => {
-    if (tx && (isMarket || (isRe && (tx.kind === 'buy' || tx.kind === 'sell')))) return numToInput(tx.price);
+    if (tx && ((isMarket && tx.kind !== 'split') || (isRe && (tx.kind === 'buy' || tx.kind === 'sell')))) return numToInput(tx.price);
     if (!tx && isMarket && marketPrice > 0) return numToInput(roundSig(marketPrice));
     return '';
   });
@@ -67,13 +67,15 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
     return '';
   });
   const [withholding, setWithholding] = useState(tx?.withholding ? numToInput(tx.withholding) : '');
+  const [splitFrom, setSplitFrom] = useState(tx?.kind === 'split' ? numToInput(tx.splitFrom) : '1');
+  const [splitTo, setSplitTo] = useState(tx?.kind === 'split' ? numToInput(tx.splitTo) : '');
   const accounts = data.assets.filter(
     (a) => a.type === 'cash' && a.id !== asset.id && ((a.currency || 'EUR') === 'EUR' || a.currency === cur)
   );
   const [cashTo, setCashTo] = useState(editing ? tx.cashTo || '' : accounts[0]?.id || '');
   const [err, setErr] = useState('');
   // Un error se refiere a lo que había escrito: al cambiar los datos, se retira.
-  useEffect(() => setErr(''), [kind, date, qty, price, fee, amount, withholding, cashTo]);
+  useEffect(() => setErr(''), [kind, date, qty, price, fee, amount, withholding, cashTo, splitFrom, splitTo]);
 
   const assetTxs = data.transactions.filter((t) => t.assetId === asset.id);
   const available = qtyAvailableOn(assetTxs, date, tx?.id);
@@ -86,6 +88,28 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
   const nFee = fee ? parseNum(fee, { money: true }) : 0;
   const nAmount = parseNum(amount, { money: true });
   const nWh = withholding ? parseNum(withholding, { money: true }) : 0;
+  const nFrom = parseNum(splitFrom);
+  const nTo = parseNum(splitTo);
+  const splitOk = nFrom > 0 && nTo > 0 && nFrom !== nTo;
+  const sf = splitOk ? nTo / nFrom : null;
+  // Precio medio justo antes del desdoblamiento, para enseñar cómo queda.
+  const avgBefore = useMemo(() => {
+    if (kind !== 'split') return null;
+    const before = sortTxs(assetTxs.filter((t) => t.id !== tx?.id && t.date <= date));
+    let q = 0;
+    let c = 0;
+    for (const t of before) {
+      if (t.kind === 'buy') {
+        q += t.qty;
+        c += t.qty * t.price + (t.fee || 0);
+      } else if (t.kind === 'sell' && q > 0) {
+        c -= (c * Math.min(t.qty, q)) / q;
+        q -= Math.min(t.qty, q);
+      } else if (t.kind === 'split') q *= splitFactor(t);
+    }
+    return q > 0 ? c / q : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, date, data.transactions]);
 
   // Importe neto de la operación en su divisa (lo que pagas o cobras).
   let net = null;
@@ -105,7 +129,17 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
     const base = { ...(tx || {}), id: tx?.id || crypto.randomUUID(), assetId: asset.id, kind, date };
     delete base.withholding;
     delete base.fxRate;
-    if (isMarket && (kind === 'buy' || kind === 'sell')) {
+    delete base.splitFrom;
+    delete base.splitTo;
+    if (kind === 'split') {
+      if (!splitOk) return setErr('Pon las dos cifras de la proporción, por ejemplo 1 y 10.');
+      if (sf > 1000 || sf < 0.001) return setErr('Esa proporción es demasiado grande: revisa las cifras.');
+      if (available <= 0) return setErr('En esa fecha no tenías acciones: el desdoblamiento no te afecta.');
+      delete base.qty;
+      delete base.price;
+      delete base.fee;
+      t = { ...base, splitFrom: nFrom, splitTo: nTo };
+    } else if (isMarket && (kind === 'buy' || kind === 'sell')) {
       if (!(nQty > 0)) return setErr('Cantidad no válida.');
       if (!(nPrice > 0)) return setErr('Precio no válido.');
       if (!(nFee >= 0)) return setErr('Comisión no válida.');
@@ -130,7 +164,7 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
       if (!(nAmount > 0)) return setErr('Importe no válido.');
       t = { ...base, qty: nAmount, price: 1, fee: 0 };
     }
-    if (cur !== 'EUR' && fxDay > 0) t.fxRate = fxDay;
+    if (cur !== 'EUR' && fxDay > 0 && kind !== 'split') t.fxRate = fxDay;
 
     let cash = null;
     if (usesCash && cashTo) {
@@ -172,7 +206,7 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
             </div>
           )}
           {kinds.length > 1 && (
-            <div className="seg-group seg-full">
+            <div className={`seg-group seg-full ${kinds.length === 4 ? 'seg-grid' : ''}`}>
               {kinds.map((k) => (
                 <button key={k.key} className={kind === k.key ? 'seg seg-on' : 'seg'} aria-pressed={kind === k.key} onClick={() => setKind(k.key)}>
                   {k.label}
@@ -212,6 +246,35 @@ function TxModal({ asset, tx, marketPrice, onClose }) {
                 Comisión ({curLabel}, opcional)
                 <NumberInput value={fee} onChange={setFee} placeholder="0" />
               </label>
+            </>
+          )}
+
+          {kind === 'split' && (
+            <>
+              <div className="explain">
+                <strong>¿Qué es un desdoblamiento?</strong> La empresa divide cada acción en varias más pequeñas:
+                tienes más acciones, cada una vale menos y tu dinero no cambia. Por ejemplo, Nvidia hizo uno de 10 por 1
+                en junio de 2024: quien tenía 2 acciones de 1.200 $ pasó a tener 20 de 120 $. También existe al revés
+                (contrasplit): juntar varias acciones en una. No es una venta, así que no paga impuestos.
+                <span className="explain-foot">
+                  Normalmente no tendrás que apuntarlo a mano: cuando Yahoo informa de uno en una acción que tienes, la app
+                  te avisa en el panel.
+                </span>
+              </div>
+              <div className="split-row">
+                <span>Cada</span>
+                <NumberInput value={splitFrom} onChange={setSplitFrom} aria-label="Acciones antes" />
+                <span>{nFrom === 1 ? 'acción pasa' : 'acciones pasan'} a ser</span>
+                <NumberInput value={splitTo} onChange={setSplitTo} autoFocus={!editing} placeholder="10" aria-label="Acciones después" />
+              </div>
+              {splitOk && showNums && available > 0 && (
+                <div className="op-total">
+                  Tenías <strong>{fmtQty(available)}</strong>
+                  {avgBefore != null && <> a {fmtPrice(avgBefore, cur)} de precio medio</>}. Pasarás a tener{' '}
+                  <strong>{fmtQty(available * sf)}</strong>
+                  {avgBefore != null && <> a {fmtPrice(avgBefore / sf, cur)}</>}. Lo que pagaste en total no cambia.
+                </div>
+              )}
             </>
           )}
 
@@ -434,6 +497,7 @@ export default function AssetDetail({ assetId, onBack }) {
       return `${fmtPrice(g, cur)}${t.withholding ? ` · ret. ${fmtPrice(t.withholding, cur)}` : ''}`;
     }
     if (t.kind === 'cost') return fmtPrice(t.qty * t.price, cur);
+    if (t.kind === 'split') return `${fmtQty(t.splitFrom)} → ${fmtQty(t.splitTo)} acciones`;
     if (isCash) return fmtPrice(t.qty, cur);
     if (isRe) return `${fmtPrice(t.price, cur)}${t.fee ? ` · gastos ${fmtPrice(t.fee, cur)}` : ''}`;
     return `${fmtQty(t.qty)} × ${fmtPrice(t.price, cur)}${t.fee ? ` · com. ${fmtPrice(t.fee, cur)}` : ''}`;
@@ -554,7 +618,9 @@ export default function AssetDetail({ assetId, onBack }) {
         </div>
         <CandleChart candles={candles} markers={show ? markers : undefined} privacy={privacy} height={240} fitKey={range} />
         <div className="chart-foot">
-          <div className="chart-legend">{isMarket && show && 'C = compra · V = venta'}</div>
+          <div className="chart-legend">
+            {isMarket && show && `C = compra · V = venta${txs.some((t) => t.kind === 'split') ? ' · D = desdoblamiento' : ''}`}
+          </div>
           <RangePicker value={range} onChange={setRange} />
         </div>
       </section>
@@ -598,7 +664,7 @@ export default function AssetDetail({ assetId, onBack }) {
         <div className="card-title">Operaciones</div>
         {txs.map((t) => {
           const link = txLink(t);
-          const tone = t.kind === 'sell' ? 'down' : t.kind === 'cost' ? '' : 'up';
+          const tone = t.kind === 'sell' ? 'down' : t.kind === 'cost' || t.kind === 'split' ? '' : 'up';
           return (
             <div key={t.id} className="tx-row">
               <span className="tx-date">{fmtDate(t.date)}</span>

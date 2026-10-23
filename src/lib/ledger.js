@@ -6,12 +6,14 @@
 //   sell    venta  (en cash: retirada)         qty, price, fee
 //   cost    gasto que suma al coste sin cambiar la cantidad (reforma de un piso)
 //   income  dividendo / renta cobrada          qty = importe bruto, price = 1, withholding
+//   split   desdoblamiento (o contrasplit)     splitFrom → splitTo: cada splitFrom acciones
+//           pasan a ser splitTo. Multiplica la cantidad y deja igual el coste total.
 //
 // Importes en la divisa de la operación (txCurrency). Cada operación en divisa
 // guarda el tipo de cambio de SU día (tx.fxRate, EUR por unidad): el coste en
 // euros es el que pagaste de verdad, no el de convertirlo al cambio de hoy.
 
-import { addMonthsStr, daysBetween, todayStr } from './dates.js';
+import { addDays, addMonthsStr, daysBetween, todayStr } from './dates.js';
 
 const EPS = 1e-9;
 
@@ -104,6 +106,12 @@ export function newLedger() {
 const n = (v) => (Number.isFinite(+v) ? +v : 0);
 export const incomeGross = (t) => n(t.qty) * (n(t.price) || 1);
 
+// Cuántas acciones nuevas hay por cada antigua (10 en un 10 por 1, 0,1 en un 1 por 10).
+export function splitFactor(t) {
+  const f = n(t.splitTo) / n(t.splitFrom);
+  return Number.isFinite(f) && f > 0 ? f : 1;
+}
+
 // Aplica una operación. `fx` = EUR por unidad de la divisa de la operación.
 export function applyTx(L, t, fx) {
   const q = n(t.qty);
@@ -145,6 +153,10 @@ export function applyTx(L, t, fx) {
       L.costCur = 0;
       L.costEur = 0;
     }
+  } else if (t.kind === 'split') {
+    // Mismo dinero repartido en más (o menos) acciones: el coste no cambia, así
+    // que el precio medio baja (o sube) en la misma proporción.
+    L.qty *= splitFactor(t);
   } else if (t.kind === 'income') {
     const gross = incomeGross(t);
     const wh = n(t.withholding);
@@ -173,6 +185,7 @@ export function validateSequence(txs) {
   let qty = 0;
   for (const t of sortTxs(txs)) {
     if (t.kind === 'buy') qty += n(t.qty);
+    else if (t.kind === 'split') qty *= splitFactor(t);
     else if (t.kind === 'sell') {
       if (n(t.qty) > qty + EPS * Math.max(1, qty)) return { ok: false, tx: t, available: Math.max(0, qty) };
       qty -= n(t.qty);
@@ -188,9 +201,29 @@ export function qtyAvailableOn(txs, date, excludeId) {
     if (t.id === excludeId) continue;
     if (t.date > date) break;
     if (t.kind === 'buy') qty += n(t.qty);
+    else if (t.kind === 'split') qty *= splitFactor(t);
     else if (t.kind === 'sell') qty -= n(t.qty);
   }
   return Math.max(0, qty);
+}
+
+// Desdoblamientos que Yahoo conoce y no están apuntados, de acciones que tenías
+// el día anterior. Uno apuntado a pocos días de distancia cuenta como el mismo
+// (Yahoo y el bróker no siempre dan la misma fecha).
+export function pendingSplits(data) {
+  const out = [];
+  for (const a of data.assets) {
+    if (a.type !== 'stock') continue;
+    const known = data.priceCache?.[a.id]?.splits;
+    if (!known?.length) continue;
+    const txs = data.transactions.filter((t) => t.assetId === a.id);
+    for (const s of known) {
+      if (qtyAvailableOn(txs, addDays(s.date, -1)) <= EPS) continue;
+      const noted = txs.some((t) => t.kind === 'split' && Math.abs(daysBetween(t.date, s.date)) <= 7);
+      if (!noted) out.push({ asset: a, ...s });
+    }
+  }
+  return out;
 }
 
 // ---------- rentabilidad ----------
@@ -303,6 +336,15 @@ export function taxReport(data, year) {
             cap: n(t.qty) - (futureCap[t.id] || 0),
             deferred: futureDeferred[t.id] || 0,
           });
+        } else if (t.kind === 'split') {
+          // Para Hacienda no es una venta: cada lote conserva su fecha y su coste
+          // total, repartido entre más (o menos) títulos.
+          const sf = splitFactor(t);
+          for (const lot of lots) {
+            lot.qty *= sf;
+            lot.cap *= sf;
+            lot.unitEur /= sf;
+          }
         } else if (t.kind === 'sell') {
           let rem = n(t.qty);
           let acq = 0;
@@ -343,16 +385,27 @@ export function taxReport(data, year) {
               lot.deferred += (loss * u) / q;
               need -= u;
             }
+            // Las recompras de después de un desdoblamiento van en títulos nuevos:
+            // `scale` convierte los títulos vendidos a esa unidad.
+            let scale = 1;
             for (let j = i + 1; j < txs.length && need > EPS; j++) {
               const u0 = txs[j];
-              if (u0.kind !== 'buy' || u0.date < t.date || u0.date > to) continue;
+              if (u0.date > to) break;
+              if (u0.kind === 'split') {
+                const sf = splitFactor(u0);
+                need *= sf;
+                scale *= sf;
+                continue;
+              }
+              if (u0.kind !== 'buy' || u0.date < t.date) continue;
               const capLeft = n(u0.qty) - (futureCap[u0.id] || 0);
               if (capLeft <= EPS) continue;
               const u = Math.min(need, capLeft);
               futureCap[u0.id] = (futureCap[u0.id] || 0) + u;
-              futureDeferred[u0.id] = (futureDeferred[u0.id] || 0) + (loss * u) / q;
+              futureDeferred[u0.id] = (futureDeferred[u0.id] || 0) + (loss * u) / (q * scale);
               need -= u;
             }
+            need /= scale;
             deferred = (loss * (q - need)) / q;
           }
           if (!t.date.startsWith(ys)) continue;
