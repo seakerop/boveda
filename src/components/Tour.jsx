@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useModal from './useModal.js';
 import Icon from './Icon.jsx';
-import VaultDoor from './VaultDoor.jsx';
+import VaultDoor, { vaultAnimEnabled } from './VaultDoor.jsx';
 
 // Tutorial de la primera vez que se entra en una bóveda. Se puede saltar en
 // cualquier momento y volver a ver desde Ajustes.
@@ -90,13 +90,50 @@ const STEPS = [
   },
 ];
 
+// Destello de cuatro puntas que parpadea alrededor del símbolo.
+function Sparkle({ className }) {
+  return (
+    <svg className={`tour-spark ${className}`} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 0C12.9 7.2 16.8 11.1 24 12 16.8 12.9 12.9 16.8 12 24 11.1 16.8 7.2 12.9 0 12 7.2 11.1 11.1 7.2 12 0Z" />
+    </svg>
+  );
+}
+
+// La puerta del primer paso: aparece cerrada, gira el dial y se abre.
+function OpeningDoor() {
+  const door = useRef(null);
+  const [anim] = useState(vaultAnimEnabled);
+  useEffect(() => {
+    if (!anim) return;
+    let alive = true;
+    const t = setTimeout(async () => {
+      if (!alive) return;
+      door.current?.spin();
+      await new Promise((r) => setTimeout(r, 700));
+      if (alive) door.current?.open();
+    }, 650);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [anim]);
+  return <VaultDoor ref={door} size={96} initial={anim ? 'closed' : 'open'} />;
+}
+
 export default function Tour({ onDone, onAddFirst }) {
   const [i, setI] = useState(0);
+  // Hacia dónde fue el último cambio de paso: el contenido entra desde ese lado.
+  const [dir, setDir] = useState(1);
   const touch = useRef(null);
   useModal(onDone);
   const step = STEPS[i];
   const last = i === STEPS.length - 1;
-  const go = (k) => setI((v) => Math.min(STEPS.length - 1, Math.max(0, v + k)));
+  const jump = (k) => {
+    if (k === i || k < 0 || k >= STEPS.length) return;
+    setDir(k > i ? 1 : -1);
+    setI(k);
+  };
+  const go = (k) => jump(i + k);
 
   // Deslizar el dedo pasa de paso, como en cualquier carrusel del móvil.
   const onTouchStart = (e) => {
@@ -132,15 +169,23 @@ export default function Tour({ onDone, onAddFirst }) {
             </button>
           )}
         </div>
-        <div className="tour-step" key={i} aria-live="polite">
-          <div className="tour-art">
+        <div className={`tour-step ${dir > 0 ? 'from-right' : 'from-left'}`} key={i} aria-live="polite">
+          <div className={`tour-art ${last ? 'is-last' : ''}`}>
+            <span className="tour-glow" />
+            <span className="tour-halo" />
             {step.art === 'vault' ? (
-              <VaultDoor size={92} initial="open" />
+              <span className="tour-pop">
+                <OpeningDoor />
+              </span>
             ) : (
-              <span className="tour-icon">
-                <Icon name={step.icon} size={30} />
+              <span className="tour-icon tour-pop">
+                <Icon name={step.icon} size={32} />
               </span>
             )}
+            <Sparkle className="s1" />
+            <Sparkle className="s2" />
+            <Sparkle className="s3" />
+            {last && <Sparkle className="s4" />}
           </div>
           <h2>{step.title}</h2>
           <p className="tour-text">{step.text}</p>
@@ -153,7 +198,7 @@ export default function Tour({ onDone, onAddFirst }) {
         </div>
         <div className="tour-dots" aria-hidden="true">
           {STEPS.map((_, k) => (
-            <button key={k} tabIndex={-1} className={k === i ? 'on' : ''} onClick={() => setI(k)} />
+            <button key={k} tabIndex={-1} className={k === i ? 'on' : k < i ? 'done' : ''} onClick={() => jump(k)} />
           ))}
         </div>
         <div className="tour-nav">
@@ -165,12 +210,12 @@ export default function Tour({ onDone, onAddFirst }) {
             <span />
           )}
           {last ? (
-            <button className="btn btn-primary" autoFocus onClick={onAddFirst || onDone}>
+            <button className="btn btn-primary tour-next tour-finish" autoFocus onClick={onAddFirst || onDone}>
               {onAddFirst ? 'Añadir lo primero' : 'Empezar'}
             </button>
           ) : (
-            <button className="btn btn-primary" autoFocus onClick={() => go(1)}>
-              Siguiente
+            <button className="btn btn-primary tour-next" autoFocus onClick={() => go(1)}>
+              Siguiente <Icon name="chevron" size={17} />
             </button>
           )}
         </div>

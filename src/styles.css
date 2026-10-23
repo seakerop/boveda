@@ -842,19 +842,61 @@ details > summary.card-title::-webkit-details-marker { display: none; }
 /* Aparece cuando la puerta ya ha terminado de abrirse y el panel ha entrado. */
 .tour-back { animation: fade 0.3s ease-out 0.45s both; }
 .tour-back .tour { animation: rise 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) 0.45s both; }
-.tour { display: flex; flex-direction: column; gap: 14px; padding-top: 14px; }
+.tour {
+  display: flex; flex-direction: column; gap: 14px; padding-top: 14px; overflow-x: hidden;
+  background:
+    radial-gradient(420px 220px at 50% 0%, rgba(76, 141, 234, 0.12), transparent 70%),
+    var(--surface);
+}
 .tour-top { display: flex; align-items: center; justify-content: space-between; min-height: 28px; }
 .tour-count { font-size: 12px; font-weight: 650; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
-.tour-step { text-align: center; min-height: 372px; animation: tourIn 0.28s ease-out; }
-.tour-step h2 { margin: 12px 0 8px; font-size: 21px; font-weight: 750; letter-spacing: -0.02em; }
-.tour-art { display: flex; justify-content: center; align-items: center; height: 104px; }
-.tour-icon {
-  width: 76px; height: 76px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--accent);
-  background: radial-gradient(circle at 50% 35%, rgba(76, 141, 234, 0.28), rgba(76, 141, 234, 0.08) 70%);
-  box-shadow: 0 0 0 1px rgba(76, 141, 234, 0.25) inset, 0 10px 30px rgba(59, 111, 224, 0.18);
+.tour-step { text-align: center; min-height: 392px; }
+.tour-step.from-right { animation: tourInR 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.tour-step.from-left { animation: tourInL 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* El texto entra un poco después que el símbolo, en cascada. */
+.tour-step > h2, .tour-step > .tour-text, .tour-step > .tour-tip, .tour-step > .tour-where { animation: tourUp 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tour-step > h2 { animation-delay: 0.08s; }
+.tour-step > .tour-text { animation-delay: 0.15s; }
+.tour-step > .tour-tip { animation-delay: 0.22s; }
+.tour-step > .tour-where { animation-delay: 0.28s; }
+.tour-step h2 { margin: 10px 0 8px; font-size: 21px; font-weight: 750; letter-spacing: -0.02em; }
+
+/* Símbolo: halo que gira, resplandor que respira, brillo que lo cruza y destellos. */
+.tour-art { position: relative; display: flex; justify-content: center; align-items: center; height: 128px; }
+.tour-glow {
+  position: absolute; width: 132px; height: 132px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(76, 141, 234, 0.42), rgba(76, 141, 234, 0.1) 45%, transparent 70%);
+  animation: tourGlow 2.8s ease-in-out infinite;
 }
+.tour-halo {
+  position: absolute; width: 104px; height: 104px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 200deg, rgba(106, 168, 247, 0.15) 250deg, rgba(150, 196, 255, 0.95) 352deg, transparent 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  animation: tourSpin 3.6s linear infinite;
+}
+.tour-pop { position: relative; display: inline-flex; animation: tourPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.tour-icon {
+  width: 78px; height: 78px; border-radius: 50%; overflow: hidden;
+  align-items: center; justify-content: center;
+  color: #9cc4ff;
+  background: radial-gradient(circle at 50% 30%, rgba(106, 168, 247, 0.38), rgba(59, 111, 224, 0.12) 72%), var(--surface-2);
+  box-shadow: 0 0 0 1px rgba(106, 168, 247, 0.35) inset, 0 12px 34px rgba(59, 111, 224, 0.35);
+}
+.tour-icon .icon { filter: drop-shadow(0 0 6px rgba(130, 182, 255, 0.85)); }
+.tour-icon::after {
+  content: ""; position: absolute; inset: -20%;
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.32) 50%, transparent 62%);
+  transform: translateX(-110%);
+  animation: tourShine 3.2s ease-in-out 0.55s infinite;
+}
+.tour-spark { position: absolute; width: 12px; height: 12px; fill: #cfe2ff; filter: drop-shadow(0 0 4px rgba(150, 196, 255, 0.9)); opacity: 0; animation: tourTwinkle 2.6s ease-in-out infinite; }
+.tour-spark.s1 { top: 14px; left: calc(50% - 64px); animation-delay: 0.5s; }
+.tour-spark.s2 { top: 30px; left: calc(50% + 52px); width: 9px; height: 9px; animation-delay: 1.3s; }
+.tour-spark.s3 { bottom: 12px; left: calc(50% + 34px); width: 14px; height: 14px; animation-delay: 2s; }
+.tour-spark.s4 { bottom: 22px; left: calc(50% - 58px); width: 10px; height: 10px; animation-delay: 0.9s; }
+.tour-art.is-last .tour-spark { animation-duration: 1.8s; }
+
 .tour-text { margin: 0 auto; max-width: 400px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
 .tour-text strong { color: var(--ink); }
 .tour-tip {
@@ -868,10 +910,33 @@ details > summary.card-title::-webkit-details-marker { display: none; }
   font-size: 12px; color: var(--muted); padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border);
 }
 .tour-dots { display: flex; justify-content: center; gap: 6px; }
-.tour-dots button { width: 7px; height: 7px; padding: 0; border-radius: 99px; background: var(--border-strong); transition: width 0.2s, background 0.2s; }
-.tour-dots button.on { width: 20px; background: var(--accent); }
+.tour-dots button { width: 7px; height: 7px; padding: 0; border-radius: 99px; background: var(--border-strong); transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.3s, box-shadow 0.3s; }
+.tour-dots button.done { background: rgba(76, 141, 234, 0.45); }
+.tour-dots button.on { width: 22px; background: linear-gradient(90deg, #5d9bf0, #8cc0ff); box-shadow: 0 0 10px rgba(106, 168, 247, 0.6); }
 .tour-nav { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
-@keyframes tourIn { from { opacity: 0; transform: translateX(14px); } }
+.tour-next { position: relative; overflow: hidden; gap: 4px; }
+.tour-next .icon { transition: transform 0.2s; }
+.tour-next:hover .icon { transform: translateX(3px); }
+/* Un reflejo cruza el botón principal de vez en cuando. */
+.tour-next::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 35%, rgba(255, 255, 255, 0.22) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: tourShine 3.6s ease-in-out 1.2s infinite;
+}
+.tour-finish { animation: tourCall 2s ease-out 0.6s infinite; }
+
+@keyframes tourInR { from { opacity: 0; transform: translateX(42px); } }
+@keyframes tourInL { from { opacity: 0; transform: translateX(-42px); } }
+@keyframes tourUp { from { opacity: 0; transform: translateY(10px); } }
+@keyframes tourPop { from { opacity: 0; transform: scale(0.55) rotate(-12deg); } }
+@keyframes tourSpin { to { transform: rotate(360deg); } }
+@keyframes tourGlow { 0%, 100% { opacity: 0.65; transform: scale(0.94); } 50% { opacity: 1; transform: scale(1.06); } }
+@keyframes tourShine { 0% { transform: translateX(-120%); } 45%, 100% { transform: translateX(120%); } }
+@keyframes tourTwinkle { 0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 45% { opacity: 1; transform: scale(1) rotate(45deg); } 70% { opacity: 0; transform: scale(0.5) rotate(90deg); } }
+@keyframes tourCall { 0% { box-shadow: 0 0 0 0 rgba(106, 168, 247, 0.5); } 100% { box-shadow: 0 0 0 14px rgba(106, 168, 247, 0); } }
 @media (prefers-reduced-motion: reduce) {
-  .tour-back, .tour-back .tour, .tour-step { animation: none; }
+  .tour-back, .tour-back .tour, .tour-step, .tour-step > *, .tour-pop, .tour-glow, .tour-halo, .tour-finish { animation: none !important; }
+  .tour-icon::after, .tour-next::after { display: none; }
+  .tour-spark { animation: none; opacity: 0.8; }
 }
