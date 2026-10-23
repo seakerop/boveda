@@ -58,6 +58,8 @@ body {
 /* clip: el zoom de "entrar por la puerta" no debe ensanchar la página; si lo
    hace, el navegador del móvil se aleja para que quepa y se queda así. */
 #root { min-height: 100dvh; overflow: clip; }
+/* Sin zoom por doble toque: la app se usa como una app, no como una página. */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @supports not (overflow: clip) { #root { overflow-x: hidden; } }
 
 .icon { flex: 0 0 auto; display: block; }
@@ -76,6 +78,8 @@ input, select {
   background: var(--surface-2);
   color: var(--ink);
   font: inherit;
+  /* 16 px como mínimo: con menos, el móvil hace zoom al tocar el campo y no lo deshace. */
+  font-size: 16px;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
